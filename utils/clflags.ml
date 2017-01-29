@@ -354,3 +354,5 @@ let parse_color_setting = function
   | "never" -> Some Misc.Color.Never
   | _ -> None
 let color = ref Misc.Color.Auto ;; (* -color *)
+
+let target_liballocs = ref false

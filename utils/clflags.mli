@@ -199,3 +199,5 @@ val set_dumped_pass : string -> bool -> unit
 
 val parse_color_setting : string -> Misc.Color.setting option
 val color : Misc.Color.setting ref
+
+val target_liballocs : bool ref

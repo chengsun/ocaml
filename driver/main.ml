@@ -154,6 +154,7 @@ module Options = Main_args.Make_bytecomp_options (struct
     end
   let _where = print_standard_library
   let _verbose = set verbose
+  let _target_liballocs = set target_liballocs
   let _nopervasives = set nopervasives
   let _dsource = set dump_source
   let _dparsetree = set dump_parsetree

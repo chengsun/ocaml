@@ -696,6 +696,11 @@ let mk_no_strict_formats f =
   \      and instead fix invalid formats.)"
 ;;
 
+let mk_target_liballocs f =
+  "-target-liballocs", Arg.Unit f,
+  " Emit C code targeting liballocs"
+;;
+
 let mk__ f =
   "-", Arg.String f,
   "<file>  Treat <file> as a file name (even if it starts with `-')"
@@ -796,6 +801,8 @@ module type Bytecomp_options = sig
   val _make_runtime : unit -> unit
   val _vmthread : unit -> unit
   val _use_runtime : string -> unit
+
+  val _target_liballocs : unit -> unit
 
   val _dinstr : unit -> unit
 
@@ -968,6 +975,7 @@ struct
     mk_no_strict_sequence F._no_strict_sequence;
     mk_strict_formats F._strict_formats;
     mk_no_strict_formats F._no_strict_formats;
+    mk_target_liballocs F._target_liballocs;
     mk_thread F._thread;
     mk_unsafe F._unsafe;
     mk_unsafe_string F._unsafe_string;

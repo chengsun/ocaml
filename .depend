@@ -574,6 +574,9 @@ bytecomp/lambda.cmo : typing/types.cmi typing/primitive.cmi typing/path.cmi \
 bytecomp/lambda.cmx : typing/types.cmx typing/primitive.cmx typing/path.cmx \
     utils/misc.cmx parsing/location.cmx typing/ident.cmx typing/env.cmx \
     parsing/asttypes.cmi bytecomp/lambda.cmi
+bytecomp/liballocs.cmo : bytecomp/liballocs.cmi
+bytecomp/liballocs.cmx : bytecomp/liballocs.cmi
+bytecomp/liballocs.cmi : bytecomp/lambda.cmi
 bytecomp/matching.cmo : typing/types.cmi bytecomp/typeopt.cmi \
     typing/typedtree.cmi bytecomp/switch.cmi bytecomp/printlambda.cmi \
     typing/primitive.cmi typing/predef.cmi typing/path.cmi \
@@ -1947,7 +1950,7 @@ driver/compile.cmo : utils/warnings.cmi typing/typemod.cmi \
     utils/timings.cmi typing/stypes.cmi bytecomp/simplif.cmi \
     typing/printtyped.cmi typing/printtyp.cmi bytecomp/printlambda.cmi \
     bytecomp/printinstr.cmi parsing/printast.cmi parsing/pprintast.cmi \
-    driver/pparse.cmi utils/misc.cmi parsing/location.cmi \
+    driver/pparse.cmi utils/misc.cmi bytecomp/liballocs.cmi parsing/location.cmi \
     typing/includemod.cmi typing/env.cmi bytecomp/emitcode.cmi \
     driver/compmisc.cmi driver/compenv.cmi utils/clflags.cmi utils/ccomp.cmi \
     bytecomp/bytegen.cmi parsing/builtin_attributes.cmi driver/compile.cmi
@@ -1956,7 +1959,7 @@ driver/compile.cmx : utils/warnings.cmx typing/typemod.cmx \
     utils/timings.cmx typing/stypes.cmx bytecomp/simplif.cmx \
     typing/printtyped.cmx typing/printtyp.cmx bytecomp/printlambda.cmx \
     bytecomp/printinstr.cmx parsing/printast.cmx parsing/pprintast.cmx \
-    driver/pparse.cmx utils/misc.cmx parsing/location.cmx \
+    driver/pparse.cmx utils/misc.cmx bytecomp/liballocs.cmi parsing/location.cmx \
     typing/includemod.cmx typing/env.cmx bytecomp/emitcode.cmx \
     driver/compmisc.cmx driver/compenv.cmx utils/clflags.cmx utils/ccomp.cmx \
     bytecomp/bytegen.cmx parsing/builtin_attributes.cmx driver/compile.cmi
