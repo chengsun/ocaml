@@ -106,7 +106,7 @@ module C = struct
 end
 
 module Emitcode = struct
-  let to_file oc _modulename _filename ~required_globals:_ c_code =
+  let to_file oc _modulename _filename c_code =
       List.iter (fun t ->
           output_string oc (C.toplevel_to_string t);
           output_string oc "\n\n";
@@ -132,7 +132,7 @@ let dumps_env env =
 let rec lambda_to_expression = function
   | Levent (body, ev) ->
       lambda_to_expression (*Envaux.env_from_summary ev.lev_env Subst.identity*) body
-  | Lprim (prim, largs, _loc) ->
+  | Lprim (prim, largs) ->
       begin
         let bop op e1 e2 = C_BinaryOp (op, lambda_to_expression e1, lambda_to_expression e2) in
         let int_bop op e1 e2 = C_BinaryOp (op,
@@ -148,8 +148,8 @@ let rec lambda_to_expression = function
         | Paddint, [e1;e2] -> int_bop "+" e1 e2
         | Psubint, [e1;e2] -> int_bop "-" e1 e2
         | Pmulint, [e1;e2] -> int_bop "*" e1 e2
-        | Pdivint Unsafe, [e1;e2] -> int_bop "/" e1 e2
-        | Pmodint Unsafe, [e1;e2] -> int_bop "%" e1 e2
+        | Pdivint, [e1;e2] -> int_bop "/" e1 e2
+        | Pmodint, [e1;e2] -> int_bop "%" e1 e2
         | Pandint, [e1;e2] -> int_bop "&" e1 e2
         | Porint, [e1;e2] -> int_bop "|" e1 e2
         | Pxorint, [e1;e2] -> int_bop "^" e1 e2
@@ -225,10 +225,10 @@ let rec lambda_to_toplevels env lam =
   match lam with
   | Levent (body, ev) ->
       lambda_to_toplevels (Envaux.env_from_summary ev.lev_env Subst.identity) body
-  | Llet (_strict, _kind, id, args, body) ->
+  | Llet (_strict, id, args, body) ->
     Printf.printf "Got a LET %s\n%!" (Ident.unique_name id);
       (let_args_to_toplevels env id args) @ (lambda_to_toplevels env body)
-  | Lprim (Pmakeblock(tag, Immutable, shape), largs, _loc) ->
+  | Lprim (Pmakeblock(tag, Immutable), largs) ->
     Printf.printf "WARNING: ignoring an immutable makeblock at the toplevel: %s\n%!" (dumps_lambda lam);
     []
   | _ -> failwith ("lambda_to_toplevels " ^ (dumps_lambda lam))
@@ -236,7 +236,7 @@ let rec lambda_to_toplevels env lam =
 let compile_implementation modulename lambda =
   Printf.printf "intercepting %s\n%!" modulename;
   match lambda with
-  | Lprim (Psetglobal id, lams, loc) when Ident.name id = modulename ->
+  | Lprim (Psetglobal id, lams) when Ident.name id = modulename ->
     List.concat (List.map (lambda_to_toplevels Env.empty) lams)
   | lam -> failwith ("compile_implementation unexpected root: " ^ (dumps_lambda lam))
 

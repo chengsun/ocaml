@@ -80,7 +80,7 @@ let implementation ppf sourcefile outputprefix =
       Warnings.check_fatal ();
       Stypes.dump (Some (outputprefix ^ ".annot"))
     end else begin
-      let lambda_code, bytecode =
+      let lambda, bytecode =
         (typedtree, coercion)
         ++ Timings.(time (Transl sourcefile))
             (Translmod.transl_implementation modulename)
@@ -91,16 +91,16 @@ let implementation ppf sourcefile outputprefix =
               ++ print_if ppf Clflags.dump_lambda Printlambda.lambda
               ++ Bytegen.compile_implementation modulename
               ++ print_if ppf Clflags.dump_instr Printinstr.instrlist
-              ++ fun bytecode -> lambda_code, bytecode)
+              ++ fun bytecode -> lambda, bytecode)
       in
       if !Clflags.target_liballocs then begin
-        let c_code = Liballocs.compile_implementation modulename lambda_code in
+        let c_code = Liballocs.compile_implementation modulename lambda in
         let cfile = outputprefix ^ ".c" in
         let oc = open_out_bin cfile in
         try
           c_code
           ++ Timings.(accumulate_time (Generate sourcefile))
-              (Liballocs.Emitcode.to_file oc modulename cfile ~required_globals);
+              (Liballocs.Emitcode.to_file oc modulename cfile);
           close_out oc
         with x ->
           close_out oc;
