@@ -18,24 +18,26 @@ module C = struct
     | C_Struct of Ident.t * (ctype * Ident.t) list
 
   type expression =
+    | C_InlineRevStatements of statement list (* putting a statement where an expression belongs; this needs to be extracted in a later pass *)
     | C_IntLiteral of int
     | C_PointerLiteral of int
     | C_Variable of Ident.t
+    | C_ArrayIndex of expression * int
     | C_Cast of ctype * expression
     | C_BinaryOp of string * expression * expression
     | C_FunCall of Ident.t * expression list
     | C_Allocate of int (* number of words *)
 
-  type statement =
+  and statement =
     | C_Expression of expression
-    | C_VarDeclare of ctype * Ident.t * expression option
-    | C_Assign of Ident.t * expression
+    | C_VarDeclare of ctype * expression * expression option
+    | C_Assign of expression * expression
     | C_If of expression * statement list * statement list option
     | C_Return of expression option
 
   type toplevel =
-    | C_GlobalDefn of ctype * Ident.t * expression option
-    | C_FunDefn of ctype * Ident.t * (ctype * Ident.t) list * statement list
+    | C_GlobalDefn of ctype * expression * expression option
+    | C_FunDefn of ctype * expression * (ctype * Ident.t) list * statement list
     | C_StaticConstructor of int * statement list
 
   let ctype_to_string = function
@@ -60,24 +62,26 @@ module C = struct
 
 
   let rec expression_to_string = function
+    | C_InlineRevStatements sl -> Printf.sprintf "/*FIXME:inline*/{\n%s\n}" (rev_statements_to_string sl)
     | C_IntLiteral i -> string_of_int i
     | C_PointerLiteral i -> Printf.sprintf "((void*)%d)" i
     | C_Variable id -> Ident.unique_name id
+    | C_ArrayIndex (e,i) -> Printf.sprintf "%s[%d]" (expression_to_string e) i
     | C_Cast (ty,e) -> Printf.sprintf "(%s)%s" (ctype_to_string ty) (expression_to_string e)
     | C_BinaryOp (op,x,y) -> "(" ^ (expression_to_string x) ^ op ^ (expression_to_string y) ^ ")"
     | C_FunCall (id,es) ->
         (Ident.unique_name id) ^ "(" ^ (map_intersperse_concat expression_to_string ", " es) ^ ")"
     | C_Allocate n -> Printf.sprintf "malloc(sizeof(intptr_t)*%d)" n
 
-  let rec statement_to_string = function
+  and statement_to_string = function
     | C_Expression e -> (expression_to_string e) ^ ";"
-    | C_VarDeclare (t,id,e_option) ->
-        (ctype_to_string t) ^ " " ^ (Ident.unique_name id) ^
+    | C_VarDeclare (t,eid,e_option) ->
+        (ctype_to_string t) ^ " " ^ (expression_to_string eid) ^
         (match e_option with
          | None -> ""
          | Some e -> " = " ^ (expression_to_string e)
         ) ^ ";"
-    | C_Assign (id,e) -> (Ident.unique_name id) ^ " = " ^ (expression_to_string e) ^ ";"
+    | C_Assign (eid,e) -> (expression_to_string eid) ^ " = " ^ (expression_to_string e) ^ ";"
     | C_If (e,ts,fs_option) ->
         "if (" ^ (expression_to_string e) ^ ") {\n" ^
         (map_intersperse_concat statement_to_string "\n" ts) ^ "\n}" ^
@@ -89,20 +93,22 @@ module C = struct
     | C_Return (Some e) -> "return " ^ (expression_to_string e) ^ ";"
     | C_Return None -> "return;"
 
+  and rev_statements_to_string sl = map_intersperse_concat statement_to_string "\n" (List.rev sl)
+
   let toplevel_to_string = function
     | C_GlobalDefn (t,id,e_option) ->
-        (ctype_to_string t) ^ " " ^ (Ident.unique_name id) ^
+        (ctype_to_string t) ^ " " ^ (expression_to_string id) ^
         (match e_option with
          | None -> ""
          | Some e -> " = " ^ (expression_to_string e)
         ) ^ ";"
     | C_FunDefn (t,id,args,xs) ->
-        (ctype_to_string t) ^ " " ^ (Ident.unique_name id) ^ "(" ^
+        (ctype_to_string t) ^ " " ^ (expression_to_string id) ^ "(" ^
         (map_intersperse_concat (fun (t,id) -> (ctype_to_string t) ^ " " ^ (Ident.unique_name id)) ", " args) ^ ") {\n" ^
-        (map_intersperse_concat statement_to_string "\n" xs) ^ "\n}"
+        (rev_statements_to_string xs) ^ "\n}"
     | C_StaticConstructor (int_id, xs) ->
         "__attribute__((constructor)) void __static_constructor_" ^ (string_of_int int_id) ^ "() {\n" ^
-        (map_intersperse_concat statement_to_string "\n" xs) ^ "\n}"
+        (rev_statements_to_string xs) ^ "\n}"
 end
 
 module Emitcode = struct
@@ -129,6 +135,23 @@ let dumps_env env =
   Env.fold_values (fun s p vd accum ->
       Printf.sprintf "%s\n%s : %s" accum s (formats Printtyp.type_expr vd.val_type)) None env ""
 
+let rec structured_constant_to_expression = function
+  | Const_base (Const_int n) -> C_IntLiteral n
+  | Const_pointer n -> C_PointerLiteral n
+  | Const_block (tag, scl) ->
+      let id = Ident.create "__structured_constant" in
+      let rec construct k statements = function
+        | [] -> (C_Expression (C_Variable id)) :: statements
+        | sc_head::scl ->
+            let s = structured_constant_to_expression sc_head in
+            construct (succ k) ((C_Assign (C_ArrayIndex (C_Variable id,k),s))::statements) scl
+      in
+      C_InlineRevStatements (construct 0 [
+          C_VarDeclare (C_Boxed, C_Variable id,
+                        Some (C_Allocate (List.length scl)))
+        ] scl)
+  | _ -> failwith "constant_to_expression: unknown constant type"
+
 let rec lambda_to_expression = function
   | Levent (body, ev) ->
       lambda_to_expression (*Envaux.env_from_summary ev.lev_env Subst.identity*) body
@@ -139,10 +162,8 @@ let rec lambda_to_expression = function
                                            C_Cast (C_Int, lambda_to_expression e1),
                                            C_Cast (C_Int, lambda_to_expression e2)) in
         match prim, largs with
-        (*
-        | Pmakeblock (tag, mut, Some ss), es ->
-            C_Allocate (List.length ss) (* TODO: is this right? *)
-           *)
+        | Pmakeblock (tag, mut), [Lconst sc] ->
+            structured_constant_to_expression sc
         | Psequand, [e1;e2] -> bop "&&" e1 e2
         | Psequor, [e1;e2] -> bop "||" e1 e2
         | Paddint, [e1;e2] -> int_bop "+" e1 e2
@@ -154,12 +175,12 @@ let rec lambda_to_expression = function
         | Porint, [e1;e2] -> int_bop "|" e1 e2
         | Pxorint, [e1;e2] -> int_bop "^" e1 e2
         | Plslint, [e1;e2] -> int_bop "<<" e1 e2
-        | Pintcomp(Ceq), [e1;e2] -> bop "==" e1 e2
-        | Pintcomp(Cneq), [e1;e2] -> bop "!=" e1 e2
-        | Pintcomp(Clt), [e1;e2] -> bop "<" e1 e2
-        | Pintcomp(Cle), [e1;e2] -> bop "<=" e1 e2
-        | Pintcomp(Cgt), [e1;e2] -> bop ">" e1 e2
-        | Pintcomp(Cge), [e1;e2] -> bop ">=" e1 e2
+        | Pintcomp(Ceq), [e1;e2] -> int_bop "==" e1 e2
+        | Pintcomp(Cneq), [e1;e2] -> int_bop "!=" e1 e2
+        | Pintcomp(Clt), [e1;e2] -> int_bop "<" e1 e2
+        | Pintcomp(Cle), [e1;e2] -> int_bop "<=" e1 e2
+        | Pintcomp(Cgt), [e1;e2] -> int_bop ">" e1 e2
+        | Pintcomp(Cge), [e1;e2] -> int_bop ">=" e1 e2
         | _ -> failwith ("lambda_to_expression Lprim " ^ (Printlambda.name_of_primitive prim))
       end
   | Lconst (Const_base (Const_int n)) -> C_IntLiteral ((n lsl 1) lor 1)
@@ -196,11 +217,11 @@ let rec let_args_to_toplevels env id lam =
       in
       let ret =
         [ C_GlobalDefn (C_TODO, id, None)
-        ; C_StaticConstructor (!id_staticconstructor, List.rev cbody_rev)]
+        ; C_StaticConstructor (!id_staticconstructor, cbody_rev)]
       in
       id_staticconstructor := succ !id_staticconstructor; ret
   | Lfunction { params ; body } ->
-    Printf.printf "Got a fun LET %s\n%!" (Ident.unique_name id);
+    Printf.printf "Got a fun LET %s\n%!" (expression_to_string id);
       let typedparams = List.map (fun id ->
         (*ENV
         Printf.printf "We have these in env: %s\n%!" (dumps_env env);
@@ -218,7 +239,7 @@ let rec let_args_to_toplevels env id lam =
             (* TODO: check return type is void *)
             cbody_rev
       in
-      [C_FunDefn (C_Boxed, id, typedparams, List.rev cbody_rev)]
+      [C_FunDefn (C_Boxed, id, typedparams, cbody_rev)]
   | lam -> failwith ("Llet " ^ (dumps_lambda lam))
 
 let rec lambda_to_toplevels env lam =
@@ -227,7 +248,7 @@ let rec lambda_to_toplevels env lam =
       lambda_to_toplevels (Envaux.env_from_summary ev.lev_env Subst.identity) body
   | Llet (_strict, id, args, body) ->
     Printf.printf "Got a LET %s\n%!" (Ident.unique_name id);
-      (let_args_to_toplevels env id args) @ (lambda_to_toplevels env body)
+      (let_args_to_toplevels env (C_Variable id) args) @ (lambda_to_toplevels env body)
   | Lprim (Pmakeblock(tag, Immutable), largs) ->
     Printf.printf "WARNING: ignoring an immutable makeblock at the toplevel: %s\n%!" (dumps_lambda lam);
     []
