@@ -4,7 +4,6 @@ open Asttypes
 open Primitive
 open Format
 open Types
-open Lambda
 
 module C = struct
   type ctype =
@@ -46,6 +45,20 @@ module C = struct
     | C_FunDefn (ct,e,args,sl) -> C_FunDefn (ct,e,args,f sl)
     | C_StaticConstructor (id,sl) -> C_StaticConstructor (id,f sl)
 
+  let rec assign_last_value_of_statement id sl = (* for extracting C_InlineRevStatements *)
+    let f e = C_Assign (C_Variable id, e) in
+    match sl with
+    | [] -> failwith "assign_last_value_of_statement: empty sl" (* TODO: unit? *)
+    | s::sl ->
+        begin
+          match s with
+          | C_Expression e -> f e :: sl
+          | C_VarDeclare _ -> failwith "assign_last_value_of_statement: unexpected C_VarDeclare as last statement in sl"
+          | C_Assign (varid,e) -> f varid :: C_Assign (varid,e) :: sl
+          | C_If (e,slt, slf) -> C_If (e, assign_last_value_of_statement id slt, assign_last_value_of_statement id slf) :: sl
+          | C_Return _ -> failwith "assign_last_value_of_statement: unexpected C_Return as last statement in sl"
+        end
+
 
   let ctype_to_string = function
     | C_TODO -> "/*TODO*/void*"
@@ -57,7 +70,6 @@ module C = struct
     | C_Char -> "char"
     | C_Struct (id, _) -> "struct " ^ (Ident.unique_name id)
 
-
   let map_intersperse_concat f sep xs =
     let rec loop accum = function
       | [] -> accum
@@ -67,14 +79,13 @@ module C = struct
     | [] -> ""
     | x::xs -> loop (f x) xs
 
-
   let rec expression_to_string = function
     | C_InlineRevStatements sl -> Printf.sprintf "/*FIXME:inline*/{\n%s\n}" (rev_statements_to_string sl)
     | C_IntLiteral i -> string_of_int i
     | C_PointerLiteral i -> Printf.sprintf "((void*)%d)" i
     | C_Variable id -> Ident.unique_name id
     | C_ArrayIndex (e,i) -> Printf.sprintf "%s[%d]" (expression_to_string e) i
-    | C_Cast (ty,e) -> Printf.sprintf "(%s)%s" (ctype_to_string ty) (expression_to_string e)
+    | C_Cast (ty,e) -> Printf.sprintf "((%s)%s)" (ctype_to_string ty) (expression_to_string e)
     | C_BinaryOp (op,x,y) -> "(" ^ (expression_to_string x) ^ op ^ (expression_to_string y) ^ ")"
     | C_FunCall (id,es) ->
         (Ident.unique_name id) ^ "(" ^ (map_intersperse_concat expression_to_string ", " es) ^ ")"
@@ -123,6 +134,7 @@ module Emitcode = struct
 end
 
 open C
+open Lambda
 
 let formats f x =
   let b = Buffer.create 16 in
@@ -201,10 +213,8 @@ let rec lambda_to_expression env lam =
   | Lvar id -> C_Variable id
   | Lapply { ap_func = Lvar id ; ap_args } ->
       C_FunCall (id, List.map (lambda_to_expression env) ap_args)
-        (* problematic
   | Lifthenelse _ ->
       C_InlineRevStatements (lambda_to_rev_statements env lam)
-        *)
   | _ -> failwith ("lambda_to_expression " ^ (dumps_lambda lam))
 
 and lambda_to_rev_statements env lam =
@@ -282,7 +292,11 @@ let rec fixup_expression accum e = (* sticks inlined statements on the front of 
   | C_InlineRevStatements (C_Expression e::sl) ->
       let (accum', e') = fixup_expression accum e in
       (fixup_rev_statements accum' sl), e'
-  | C_InlineRevStatements _ -> failwith "fixup_expression: invalid inlinerevstatements (last statement not a value expression)"
+  | C_InlineRevStatements sl ->
+      let id = Ident.create "__deinlined" in
+      let sl' = fixup_rev_statements ((C_VarDeclare (C_TODO, C_Variable id, None))::accum) sl in
+      let sl'' = assign_last_value_of_statement id sl' in
+      sl'', C_Variable id
   | C_IntLiteral _ | C_PointerLiteral _ | C_Variable _
   | C_Allocate _ -> accum, e
   | C_ArrayIndex (e,i) -> let (accum', e') = fixup_expression accum e in accum', C_ArrayIndex (e',i)
