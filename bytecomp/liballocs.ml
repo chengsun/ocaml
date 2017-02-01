@@ -20,8 +20,10 @@ module C = struct
     | C_InlineRevStatements of statement list (* putting a statement where an expression belongs; this needs to be extracted in a later pass *)
     | C_IntLiteral of int
     | C_PointerLiteral of int
+    | C_GlobalVariable of Ident.t
     | C_Variable of Ident.t
     | C_ArrayIndex of expression * int
+    | C_InitialiserList of expression list
     | C_Cast of ctype * expression
     | C_BinaryOp of string * expression * expression
     | C_FunCall of Ident.t * expression list
@@ -83,8 +85,10 @@ module C = struct
     | C_InlineRevStatements sl -> Printf.sprintf "/*FIXME:inline*/{\n%s\n}" (rev_statements_to_string sl)
     | C_IntLiteral i -> string_of_int i
     | C_PointerLiteral i -> Printf.sprintf "((void*)%d)" i
+    | C_GlobalVariable id -> Ident.name id
     | C_Variable id -> Ident.unique_name id
     | C_ArrayIndex (e,i) -> Printf.sprintf "%s[%d]" (expression_to_string e) i
+    | C_InitialiserList es -> Printf.sprintf "{%s}" (map_intersperse_concat expression_to_string ", " es)
     | C_Cast (ty,e) -> Printf.sprintf "((%s)%s)" (ctype_to_string ty) (expression_to_string e)
     | C_BinaryOp (op,x,y) -> "(" ^ (expression_to_string x) ^ op ^ (expression_to_string y) ^ ")"
     | C_FunCall (id,es) ->
@@ -274,23 +278,24 @@ let rec let_args_to_toplevels env id lam =
       in
       id_staticconstructor := succ !id_staticconstructor; ret
 
-let rec lambda_to_toplevels env lam =
+let rec lambda_to_toplevels module_id env lam =
   match lam with
   | Levent (body, ev) ->
-      lambda_to_toplevels (Envaux.env_from_summary ev.lev_env Subst.identity) body
+      lambda_to_toplevels module_id (Envaux.env_from_summary ev.lev_env Subst.identity) body
   | Llet (_strict, id, args, body) ->
     Printf.printf "Got a LET %s\n%!" (Ident.unique_name id);
-      (let_args_to_toplevels env (C_Variable id) args) @ (lambda_to_toplevels env body)
+      (let_args_to_toplevels env (C_Variable id) args) @ (lambda_to_toplevels module_id env body)
   | Lsequence (l1, l2) -> (* TODO: dedup this... *)
       let cbody_rev = lambda_to_rev_statements env l1 in
       let ret =
         C_StaticConstructor (!id_staticconstructor, cbody_rev)
       in
       id_staticconstructor := succ !id_staticconstructor;
-      ret :: (lambda_to_toplevels env l2)
+      ret :: (lambda_to_toplevels module_id env l2)
   | Lprim (Pmakeblock(tag, Immutable), largs) ->
-    Printf.printf "WARNING: ignoring an immutable makeblock at the toplevel: %s\n%!" (dumps_lambda lam);
-    []
+      (* immutable makeblock at the toplevel, export table *)
+      [C_GlobalDefn (C_TODO, C_ArrayIndex (C_GlobalVariable module_id, List.length (largs)),
+                     Some (C_InitialiserList (List.map (lambda_to_expression env) largs)))]
   | _ -> failwith ("lambda_to_toplevels " ^ (dumps_lambda lam))
 
 
@@ -306,7 +311,7 @@ let rec fixup_expression accum e = (* sticks inlined statements on the front of 
       let sl' = fixup_rev_statements ((C_VarDeclare (C_TODO, C_Variable id, None))::accum) sl in
       let sl'' = assign_last_value_of_statement id sl' in
       sl'', C_Variable id
-  | C_IntLiteral _ | C_PointerLiteral _ | C_Variable _
+  | C_IntLiteral _ | C_PointerLiteral _ | C_Variable _ | C_GlobalVariable _
   | C_Allocate _ -> accum, e
   | C_ArrayIndex (e,i) -> let (accum', e') = fixup_expression accum e in accum', C_ArrayIndex (e',i)
   | C_Cast (ty,e) -> let (accum', e') = fixup_expression accum e in accum', C_Cast (ty,e')
@@ -314,7 +319,16 @@ let rec fixup_expression accum e = (* sticks inlined statements on the front of 
       let (accum', e1') = fixup_expression accum e1 in
       let (accum'', e2') = fixup_expression accum' e2 in
       accum'', C_BinaryOp (ty,e1',e2')
-  | C_FunCall (id,es) ->
+  | C_InitialiserList es ->
+      let rec loop accum es' = function
+        | [] -> accum, List.rev es'
+        | e::es ->
+            let (accum', e') = fixup_expression accum e in
+            loop accum' (e'::es') es
+      in
+      let (accum', es') = loop accum [] es in
+      accum', C_InitialiserList es'
+  | C_FunCall (id,es) -> (*TODO dedup *)
       let rec loop accum es' = function
         | [] -> accum, List.rev es'
         | e::es ->
@@ -347,8 +361,8 @@ let compile_implementation modulename lambda =
   Printf.printf "intercepting %s\n%!" modulename;
   let toplevels =
     match lambda with
-    | Lprim (Psetglobal id, lams) when Ident.name id = modulename ->
-      List.concat (List.map (lambda_to_toplevels Env.empty) lams)
+    | Lprim (Psetglobal id, [lam]) when Ident.name id = modulename ->
+        lambda_to_toplevels id Env.empty lam
     | lam -> failwith ("compile_implementation unexpected root: " ^ (dumps_lambda lam))
   in
   let fixed_toplevels =
