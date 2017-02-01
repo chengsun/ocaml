@@ -178,6 +178,8 @@ let rec lambda_to_expression env lam =
                                            C_Cast (C_Int, lambda_to_expression env e1),
                                            C_Cast (C_Int, lambda_to_expression env e2)) in
         match prim, largs with
+        | Popaque, [e] -> C_InlineRevStatements (lambda_to_rev_statements env e)
+        | Pgetglobal id, [] -> C_Variable id
         | Pmakeblock (tag, mut), contents ->
             let id = Ident.create "__makeblock" in
             let rec construct k statements = function (* TODO: this construct is almost identical to that in structured_constant_to_expression::Const_block *)
@@ -279,6 +281,13 @@ let rec lambda_to_toplevels env lam =
   | Llet (_strict, id, args, body) ->
     Printf.printf "Got a LET %s\n%!" (Ident.unique_name id);
       (let_args_to_toplevels env (C_Variable id) args) @ (lambda_to_toplevels env body)
+  | Lsequence (l1, l2) -> (* TODO: dedup this... *)
+      let cbody_rev = lambda_to_rev_statements env l1 in
+      let ret =
+        C_StaticConstructor (!id_staticconstructor, cbody_rev)
+      in
+      id_staticconstructor := succ !id_staticconstructor;
+      ret :: (lambda_to_toplevels env l2)
   | Lprim (Pmakeblock(tag, Immutable), largs) ->
     Printf.printf "WARNING: ignoring an immutable makeblock at the toplevel: %s\n%!" (dumps_lambda lam);
     []
