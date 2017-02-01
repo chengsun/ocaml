@@ -32,13 +32,20 @@ module C = struct
     | C_Expression of expression
     | C_VarDeclare of ctype * expression * expression option
     | C_Assign of expression * expression
-    | C_If of expression * statement list * statement list option
+    | C_If of expression * statement list * statement list
     | C_Return of expression option
 
   type toplevel =
     | C_GlobalDefn of ctype * expression * expression option
     | C_FunDefn of ctype * expression * (ctype * Ident.t) list * statement list
     | C_StaticConstructor of int * statement list
+
+  let rec map_toplevel f t =
+    match t with
+    | C_GlobalDefn _ -> t
+    | C_FunDefn (ct,e,args,sl) -> C_FunDefn (ct,e,args,f sl)
+    | C_StaticConstructor (id,sl) -> C_StaticConstructor (id,f sl)
+
 
   let ctype_to_string = function
     | C_TODO -> "/*TODO*/void*"
@@ -82,14 +89,10 @@ module C = struct
          | Some e -> " = " ^ (expression_to_string e)
         ) ^ ";"
     | C_Assign (eid,e) -> (expression_to_string eid) ^ " = " ^ (expression_to_string e) ^ ";"
-    | C_If (e,ts,fs_option) ->
+    | C_If (e,ts,fs) ->
         "if (" ^ (expression_to_string e) ^ ") {\n" ^
-        (map_intersperse_concat statement_to_string "\n" ts) ^ "\n}" ^
-        (match fs_option with
-         | None -> ""
-         | Some fs -> " else {\n" ^
-                      (map_intersperse_concat statement_to_string "\n" fs) ^ "\n}"
-        )
+        (map_intersperse_concat statement_to_string "\n" ts) ^ "\n} else {\n" ^
+        (map_intersperse_concat statement_to_string "\n" fs) ^ "\n}"
     | C_Return (Some e) -> "return " ^ (expression_to_string e) ^ ";"
     | C_Return None -> "return;"
 
@@ -162,8 +165,18 @@ let rec lambda_to_expression = function
                                            C_Cast (C_Int, lambda_to_expression e1),
                                            C_Cast (C_Int, lambda_to_expression e2)) in
         match prim, largs with
-        | Pmakeblock (tag, mut), [Lconst sc] ->
-            structured_constant_to_expression sc
+        | Pmakeblock (tag, mut), contents ->
+            let id = Ident.create "__makeblock" in
+            let rec construct k statements = function (* TODO: this construct is almost identical to that in structured_constant_to_expression::Const_block *)
+              | [] -> (C_Expression (C_Variable id)) :: statements
+              | e_head::el ->
+                  let s = lambda_to_expression e_head in
+                  construct (succ k) ((C_Assign (C_ArrayIndex (C_Variable id,k),s))::statements) el
+            in
+            C_InlineRevStatements (construct 0 [
+                C_VarDeclare (C_Boxed, C_Variable id,
+                              Some (C_Allocate (List.length contents)))
+              ] contents)
         | Psequand, [e1;e2] -> bop "&&" e1 e2
         | Psequor, [e1;e2] -> bop "||" e1 e2
         | Paddint, [e1;e2] -> int_bop "+" e1 e2
@@ -183,8 +196,7 @@ let rec lambda_to_expression = function
         | Pintcomp(Cge), [e1;e2] -> int_bop ">=" e1 e2
         | _ -> failwith ("lambda_to_expression Lprim " ^ (Printlambda.name_of_primitive prim))
       end
-  | Lconst (Const_base (Const_int n)) -> C_IntLiteral ((n lsl 1) lor 1)
-  | Lconst (Const_pointer n) -> C_PointerLiteral n
+  | Lconst sc -> structured_constant_to_expression sc (* TODO: share constants, and construct at compile time *)
   | Lvar id -> C_Variable id
   | Lapply { ap_func = Lvar id ; ap_args } ->
       C_FunCall (id, List.map lambda_to_expression ap_args)
@@ -254,10 +266,62 @@ let rec lambda_to_toplevels env lam =
     []
   | _ -> failwith ("lambda_to_toplevels " ^ (dumps_lambda lam))
 
+
+
+let rec fixup_expression accum e = (* sticks inlined statements on the front of accum *)
+  match e with
+  | C_InlineRevStatements [] -> failwith "fixup_expression: invalid inlinerevstatements (empty)"
+  | C_InlineRevStatements (C_Expression e::sl) ->
+      let (accum', e') = fixup_expression accum e in
+      (fixup_rev_statements accum' sl), e'
+  | C_InlineRevStatements _ -> failwith "fixup_expression: invalid inlinerevstatements (last statement not a value expression)"
+  | C_IntLiteral _ | C_PointerLiteral _ | C_Variable _
+  | C_Allocate _ -> accum, e
+  | C_ArrayIndex (e,i) -> let (accum', e') = fixup_expression accum e in accum', C_ArrayIndex (e',i)
+  | C_Cast (ty,e) -> let (accum', e') = fixup_expression accum e in accum', C_Cast (ty,e')
+  | C_BinaryOp (ty,e1,e2) ->
+      let (accum', e1') = fixup_expression accum e1 in
+      let (accum'', e2') = fixup_expression accum' e2 in
+      accum'', C_BinaryOp (ty,e1',e2')
+  | C_FunCall (id,es) ->
+      let rec loop accum es' = function
+        | [] -> accum, List.rev es'
+        | e::es ->
+            let (accum', e') = fixup_expression accum e in
+            loop accum' (e'::es') es
+      in
+      let (accum', es') = loop accum [] es in
+      accum', C_FunCall (id,es')
+
+and fixup_rev_statements accum sl = (* sticks fixed up sl on the front of accum *)
+  let rec loop accum = function
+    | [] -> accum
+    | s::statements ->
+        let accum'' =
+          match s with
+          | C_Expression e -> let (accum', e') = fixup_expression accum e in (C_Expression e') :: accum'
+          | C_VarDeclare (ty,eid,None) -> C_VarDeclare (ty,eid,None) :: accum
+          | C_VarDeclare (ty,eid,Some e) -> let (accum', e') = fixup_expression accum e in C_VarDeclare (ty,eid,Some e') :: accum'
+          | C_Assign (eid,e) -> let (accum', e') = fixup_expression accum e in C_Assign (eid,e') :: accum'
+          | C_If (e,slt,slf) -> let (accum', e') = fixup_expression accum e in (C_If (e', loop [] slt, loop [] slf)) :: accum'
+          | C_Return (None) -> C_Return (None) :: accum
+          | C_Return (Some e) -> let (accum', e') = fixup_expression accum e in (C_Return (Some e')) :: accum'
+        in
+        loop accum'' statements
+  in
+  loop accum (List.rev sl)
+
+
 let compile_implementation modulename lambda =
   Printf.printf "intercepting %s\n%!" modulename;
-  match lambda with
-  | Lprim (Psetglobal id, lams) when Ident.name id = modulename ->
-    List.concat (List.map (lambda_to_toplevels Env.empty) lams)
-  | lam -> failwith ("compile_implementation unexpected root: " ^ (dumps_lambda lam))
+  let toplevels =
+    match lambda with
+    | Lprim (Psetglobal id, lams) when Ident.name id = modulename ->
+      List.concat (List.map (lambda_to_toplevels Env.empty) lams)
+    | lam -> failwith ("compile_implementation unexpected root: " ^ (dumps_lambda lam))
+  in
+  let fixed_toplevels =
+    List.map (map_toplevel (fixup_rev_statements [])) toplevels
+  in
+  fixed_toplevels
 
