@@ -155,22 +155,23 @@ let rec structured_constant_to_expression = function
         ] scl)
   | _ -> failwith "constant_to_expression: unknown constant type"
 
-let rec lambda_to_expression = function
+let rec lambda_to_expression env lam =
+  match lam with
   | Levent (body, ev) ->
-      lambda_to_expression (*Envaux.env_from_summary ev.lev_env Subst.identity*) body
+      lambda_to_expression (Envaux.env_from_summary ev.lev_env Subst.identity) body
   | Lprim (prim, largs) ->
       begin
-        let bop op e1 e2 = C_BinaryOp (op, lambda_to_expression e1, lambda_to_expression e2) in
+        let bop op e1 e2 = C_BinaryOp (op, lambda_to_expression env e1, lambda_to_expression env e2) in
         let int_bop op e1 e2 = C_BinaryOp (op,
-                                           C_Cast (C_Int, lambda_to_expression e1),
-                                           C_Cast (C_Int, lambda_to_expression e2)) in
+                                           C_Cast (C_Int, lambda_to_expression env e1),
+                                           C_Cast (C_Int, lambda_to_expression env e2)) in
         match prim, largs with
         | Pmakeblock (tag, mut), contents ->
             let id = Ident.create "__makeblock" in
             let rec construct k statements = function (* TODO: this construct is almost identical to that in structured_constant_to_expression::Const_block *)
               | [] -> (C_Expression (C_Variable id)) :: statements
               | e_head::el ->
-                  let s = lambda_to_expression e_head in
+                  let s = lambda_to_expression env e_head in
                   construct (succ k) ((C_Assign (C_ArrayIndex (C_Variable id,k),s))::statements) el
             in
             C_InlineRevStatements (construct 0 [
@@ -199,17 +200,25 @@ let rec lambda_to_expression = function
   | Lconst sc -> structured_constant_to_expression sc (* TODO: share constants, and construct at compile time *)
   | Lvar id -> C_Variable id
   | Lapply { ap_func = Lvar id ; ap_args } ->
-      C_FunCall (id, List.map lambda_to_expression ap_args)
-  | lam -> failwith ("lambda_to_expression " ^ (dumps_lambda lam))
+      C_FunCall (id, List.map (lambda_to_expression env) ap_args)
+        (* problematic
+  | Lifthenelse _ ->
+      C_InlineRevStatements (lambda_to_rev_statements env lam)
+        *)
+  | _ -> failwith ("lambda_to_expression " ^ (dumps_lambda lam))
 
-let rec lambda_to_rev_statements env lam =
+and lambda_to_rev_statements env lam =
   match lam with
   | Levent (body, ev) ->
       lambda_to_rev_statements (Envaux.env_from_summary ev.lev_env Subst.identity) body
   | Lvar _ | Lconst _ | Lprim _ | Lapply _ ->
-      [C_Expression (lambda_to_expression lam)]
+      [C_Expression (lambda_to_expression env lam)]
   | Lsequence (l1, l2) ->
       (lambda_to_rev_statements env l2) @ (lambda_to_rev_statements env l1)
+  | Lifthenelse (l,lt,lf) ->
+      [C_If (lambda_to_expression env l,
+             lambda_to_rev_statements env lt,
+             lambda_to_rev_statements env lf)]
   | lam -> failwith ("lambda_to_rev_statements " ^ (dumps_lambda lam))
 
 let id_staticconstructor = ref 0
@@ -218,20 +227,6 @@ let rec let_args_to_toplevels env id lam =
   match lam with
   | Levent (body, ev) ->
       let_args_to_toplevels (Envaux.env_from_summary ev.lev_env Subst.identity) id body
-  | Lvar _ | Lconst _ | Lprim _ ->
-      let cbody_rev =
-        match lambda_to_rev_statements env lam with
-        | [] -> failwith "let_args_to_toplevels: empty let body?"
-        | (C_Expression laste)::bodytl -> (C_Assign (id, laste))::bodytl
-        | cbody_rev ->
-            (* TODO: check return type is void *)
-            cbody_rev
-      in
-      let ret =
-        [ C_GlobalDefn (C_TODO, id, None)
-        ; C_StaticConstructor (!id_staticconstructor, cbody_rev)]
-      in
-      id_staticconstructor := succ !id_staticconstructor; ret
   | Lfunction { params ; body } ->
     Printf.printf "Got a fun LET %s\n%!" (expression_to_string id);
       let typedparams = List.map (fun id ->
@@ -252,7 +247,20 @@ let rec let_args_to_toplevels env id lam =
             cbody_rev
       in
       [C_FunDefn (C_Boxed, id, typedparams, cbody_rev)]
-  | lam -> failwith ("Llet " ^ (dumps_lambda lam))
+  | _ ->
+      let cbody_rev =
+        match lambda_to_rev_statements env lam with
+        | [] -> failwith "let_args_to_toplevels: empty let body?"
+        | (C_Expression laste)::bodytl -> (C_Assign (id, laste))::bodytl
+        | cbody_rev ->
+            (* TODO: check return type is void *)
+            cbody_rev
+      in
+      let ret =
+        [ C_GlobalDefn (C_TODO, id, None)
+        ; C_StaticConstructor (!id_staticconstructor, cbody_rev)]
+      in
+      id_staticconstructor := succ !id_staticconstructor; ret
 
 let rec lambda_to_toplevels env lam =
   match lam with
