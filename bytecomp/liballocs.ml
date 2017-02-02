@@ -37,16 +37,18 @@ module C = struct
     | C_Expression of expression
     | C_VarDeclare of ctype * expression * expression option
     | C_Assign of expression * expression
-    | C_If of expression * statement list * statement list
+    | C_If of expression * statement list * statement list (* reversed! *)
     | C_Return of expression option
 
   type toplevel =
     | C_GlobalDefn of ctype * expression * expression option
+    | C_ExternDecl of ctype * expression
     | C_FunDefn of ctype * expression * (ctype * Ident.t) list * statement list option
 
   let rec map_toplevel f t =
     match t with
     | C_GlobalDefn _ -> t
+    | C_ExternDecl _ -> t
     | C_FunDefn (ct,e,args,Some sl) -> C_FunDefn (ct,e,args,Some (f sl))
     | C_FunDefn _ -> t
 
@@ -125,8 +127,8 @@ module C = struct
     | C_Assign (eid,e) -> (expression_to_string eid) ^ " = " ^ (expression_to_string e) ^ ";"
     | C_If (e,ts,fs) ->
         "if (" ^ (expression_to_string e) ^ ") {\n" ^
-        (map_intersperse_concat statement_to_string "\n" ts) ^ "\n} else {\n" ^
-        (map_intersperse_concat statement_to_string "\n" fs) ^ "\n}"
+        (map_intersperse_concat statement_to_string "\n" (List.rev ts)) ^ "\n} else {\n" ^
+        (map_intersperse_concat statement_to_string "\n" (List.rev fs)) ^ "\n}"
     | C_Return (Some e) -> "return " ^ (expression_to_string e) ^ ";"
     | C_Return None -> "return;"
 
@@ -139,6 +141,8 @@ module C = struct
          | None -> ""
          | Some e -> " = " ^ (expression_to_string e)
         ) ^ ";"
+    | C_ExternDecl (t,id) ->
+        Printf.sprintf "extern %s %s;" (ctype_to_string t) (expression_to_string id)
     | C_FunDefn (t,id,args,xs_option) ->
         (ctype_to_string t) ^ " " ^ (expression_to_string id) ^ "(" ^
         (map_intersperse_concat (fun (t,id) -> (ctype_to_string t) ^ " " ^ (Ident.unique_name id)) ", " args) ^ ")" ^
@@ -340,9 +344,11 @@ let compile_implementation modulename lambda =
         static_constructors := cbody_rev @ !static_constructors;
         lambda_to_toplevels module_id env l2
     | Lprim (Pmakeblock(tag, Immutable), largs) ->
-        (* immutable makeblock at the toplevel, export table *)
-        [C_GlobalDefn (C_TODO, C_ArrayIndex (C_GlobalVariable module_id, Some (List.length (largs))),
-                       Some (C_InitialiserList (List.map (lambda_to_expression env) largs)))]
+        (* immutable makeblock at the toplevel: add module export table init code *)
+        let es = lambda_to_expression env lam in
+        let export_var = C_GlobalVariable module_id in
+        static_constructors := C_Assign (export_var, es) :: !static_constructors;
+        [C_GlobalDefn (C_Pointer C_TODO, export_var, None) (* .bss NULL *)]
     | _ -> failwith ("lambda_to_toplevels " ^ (dumps_lambda lam))
   in
 
@@ -416,18 +422,20 @@ let compile_implementation modulename lambda =
     List.map (map_toplevel (fixup_rev_statements [])) toplevels
   in
 
-  let fixed_static_constructors = fixup_rev_statements [] !static_constructors in
+  let module_id = Ident.create modulename in
+  let fixed_static_constructors =
+    C_If (C_GlobalVariable module_id,
+          [C_Return None],
+          fixup_rev_statements [] !static_constructors)
+  in
   let the_module_constructor =
-    C_FunDefn (C_Void, C_GlobalVariable (module_initialiser_name (Ident.create modulename)), [],
-               Some (fixed_static_constructors))
+    C_FunDefn (C_Void, C_GlobalVariable (module_initialiser_name module_id), [], Some [fixed_static_constructors])
   in
 
   let global_decls =
     List.concat (List.map (fun global_id ->
         [ C_FunDefn (C_Void, C_GlobalVariable (module_initialiser_name global_id), [], None)
-        ; C_GlobalDefn (C_Pointer C_TODO,
-                        C_GlobalVariable global_id,
-                        None) (* .bss NULL *)
+        ; C_ExternDecl (C_Pointer C_TODO, C_GlobalVariable global_id)
         ]
       ) !globals)
   in
