@@ -15,18 +15,21 @@ module C = struct
     | C_Bool
     | C_Char
     | C_Struct of Ident.t * (ctype * Ident.t) list
+    | C_FunPointer of ctype * ctype list
+    | C_VarArgs
 
   type expression =
     | C_InlineRevStatements of statement list (* putting a statement where an expression belongs; this needs to be extracted in a later pass *)
     | C_IntLiteral of int
     | C_PointerLiteral of int
+    | C_StringLiteral of string
     | C_GlobalVariable of Ident.t
     | C_Variable of Ident.t
     | C_ArrayIndex of expression * int
     | C_InitialiserList of expression list
     | C_Cast of ctype * expression
     | C_BinaryOp of string * expression * expression
-    | C_FunCall of Ident.t * expression list
+    | C_FunCall of expression * expression list
     | C_Allocate of int (* number of words *)
 
   and statement =
@@ -62,16 +65,6 @@ module C = struct
         end
 
 
-  let ctype_to_string = function
-    | C_TODO -> "/*TODO*/void*"
-    | C_Boxed -> "void*"
-    | C_Void -> "void"
-    | C_Int -> "intptr_t"
-    | C_UInt -> "unsigned"
-    | C_Bool -> "bool"
-    | C_Char -> "char"
-    | C_Struct (id, _) -> "struct " ^ (Ident.unique_name id)
-
   let map_intersperse_concat f sep xs =
     let rec loop accum = function
       | [] -> accum
@@ -81,18 +74,42 @@ module C = struct
     | [] -> ""
     | x::xs -> loop (f x) xs
 
+  let rec ctype_to_string = function
+    | C_TODO -> "/*TODO*/void*"
+    | C_Boxed -> "intptr_t*"
+    | C_Void -> "void"
+    | C_Int -> "intptr_t"
+    | C_UInt -> "unsigned"
+    | C_Bool -> "bool"
+    | C_Char -> "char"
+    | C_Struct (id, _) -> "struct " ^ (Ident.unique_name id)
+    | C_FunPointer (tyret, tyargs) -> Printf.sprintf "%s(*)(%s)" (ctype_to_string tyret) (map_intersperse_concat ctype_to_string "," tyargs)
+    | C_VarArgs -> "..."
+
+  let string_split_on_char sep s =
+    let r = ref [] in
+    let j = ref (String.length s) in
+    for i = String.length s - 1 downto 0 do
+      if String.unsafe_get s i = sep then begin
+        r := String.sub s (i + 1) (!j - i - 1) :: !r;
+        j := i
+      end
+    done;
+    String.sub s 0 !j :: !r
+
   let rec expression_to_string = function
     | C_InlineRevStatements sl -> Printf.sprintf "/*FIXME:inline*/{\n%s\n}" (rev_statements_to_string sl)
     | C_IntLiteral i -> string_of_int i
     | C_PointerLiteral i -> Printf.sprintf "((void*)%d)" i
+    | C_StringLiteral str -> Printf.sprintf "\"%s\"" (String.concat "\\\"" (string_split_on_char '"' str))
     | C_GlobalVariable id -> Ident.name id
     | C_Variable id -> Ident.unique_name id
     | C_ArrayIndex (e,i) -> Printf.sprintf "%s[%d]" (expression_to_string e) i
     | C_InitialiserList es -> Printf.sprintf "{%s}" (map_intersperse_concat expression_to_string ", " es)
     | C_Cast (ty,e) -> Printf.sprintf "((%s)%s)" (ctype_to_string ty) (expression_to_string e)
     | C_BinaryOp (op,x,y) -> "(" ^ (expression_to_string x) ^ op ^ (expression_to_string y) ^ ")"
-    | C_FunCall (id,es) ->
-        (Ident.unique_name id) ^ "(" ^ (map_intersperse_concat expression_to_string ", " es) ^ ")"
+    | C_FunCall (e_id,es) ->
+        (expression_to_string e_id) ^ "(" ^ (map_intersperse_concat expression_to_string ", " es) ^ ")"
     | C_Allocate n -> Printf.sprintf "malloc(sizeof(intptr_t)*%d)" n
 
   and statement_to_string = function
@@ -131,9 +148,13 @@ end
 
 module Emitcode = struct
   let to_file oc _modulename _filename c_code =
-      List.iter (fun t ->
-          output_string oc (C.toplevel_to_string t);
-          output_string oc "\n\n";
+    output_string oc "#include <stdlib.h>\n#include <stdint.h>\n";
+    output_string oc "\n";
+    (* FIXME: hardcoded for printf *)
+    output_string oc "void *Printf[];\n";
+    List.iter (fun t ->
+        output_string oc (C.toplevel_to_string t);
+        output_string oc "\n\n";
       ) c_code
 end
 
@@ -156,7 +177,9 @@ let dumps_env env =
 
 let rec structured_constant_to_expression = function
   | Const_base (Const_int n) -> C_IntLiteral n
+  | Const_base (Const_string (s, None)) -> C_StringLiteral s (* FIXME: MUTABLE STRING, SHOULD NOT BE SHARED/just a literal *)
   | Const_pointer n -> C_PointerLiteral n
+  | Const_immstring str -> C_StringLiteral str (* immediate/immutable string *)
   | Const_block (tag, scl) ->
       let id = Ident.create "__structured_constant" in
       let rec construct k statements = function
@@ -182,8 +205,9 @@ let rec lambda_to_expression env lam =
                                            C_Cast (C_Int, lambda_to_expression env e1),
                                            C_Cast (C_Int, lambda_to_expression env e2)) in
         match prim, largs with
-        | Popaque, [e] -> C_InlineRevStatements (lambda_to_rev_statements env e)
-        | Pgetglobal id, [] -> C_Variable id
+        | Popaque, [lam] -> C_InlineRevStatements (lambda_to_rev_statements env lam)
+        | Pgetglobal id, [] -> C_GlobalVariable id
+        | Pfield i, [lam] -> C_ArrayIndex (lambda_to_expression env lam, i)
         | Pmakeblock (tag, mut), contents ->
             let id = Ident.create "__makeblock" in
             let rec construct k statements = function (* TODO: this construct is almost identical to that in structured_constant_to_expression::Const_block *)
@@ -217,8 +241,20 @@ let rec lambda_to_expression env lam =
       end
   | Lconst sc -> structured_constant_to_expression sc (* TODO: share constants, and construct at compile time *)
   | Lvar id -> C_Variable id
-  | Lapply { ap_func = Lvar id ; ap_args } ->
-      C_FunCall (id, List.map (lambda_to_expression env) ap_args)
+  | Lapply { ap_func = e_id ; ap_args } ->
+      (* FIXME: hardcoded for printf *)
+      let vararg =
+        match e_id with
+        | Lprim (Pfield _, [Lprim (Pgetglobal id, [])]) when Ident.name id = "Printf" -> true
+        | _ -> false
+      in
+      let ty =
+        if vararg
+        then C_FunPointer (C_Boxed, [C_Boxed; C_VarArgs])
+        else C_FunPointer (C_Boxed, List.map (fun _ -> C_Boxed) ap_args)
+      in
+      C_FunCall (C_Cast (ty, lambda_to_expression env e_id),
+                 List.map (lambda_to_expression env) ap_args)
   | Lifthenelse _ ->
       C_InlineRevStatements (lambda_to_rev_statements env lam)
   | _ -> failwith ("lambda_to_expression " ^ (dumps_lambda lam))
@@ -311,8 +347,8 @@ let rec fixup_expression accum e = (* sticks inlined statements on the front of 
       let sl' = fixup_rev_statements ((C_VarDeclare (C_TODO, C_Variable id, None))::accum) sl in
       let sl'' = assign_last_value_of_statement id sl' in
       sl'', C_Variable id
-  | C_IntLiteral _ | C_PointerLiteral _ | C_Variable _ | C_GlobalVariable _
-  | C_Allocate _ -> accum, e
+  | C_IntLiteral _ | C_PointerLiteral _ | C_StringLiteral _ | C_Variable _
+  | C_GlobalVariable _ | C_Allocate _ -> accum, e
   | C_ArrayIndex (e,i) -> let (accum', e') = fixup_expression accum e in accum', C_ArrayIndex (e',i)
   | C_Cast (ty,e) -> let (accum', e') = fixup_expression accum e in accum', C_Cast (ty,e')
   | C_BinaryOp (ty,e1,e2) ->
