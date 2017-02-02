@@ -24,6 +24,7 @@ module C = struct
     | C_IntLiteral of int
     | C_PointerLiteral of int
     | C_StringLiteral of string
+    | C_CharLiteral of char
     | C_GlobalVariable of Ident.t
     | C_Variable of Ident.t
     | C_ArrayIndex of expression * int option
@@ -104,7 +105,8 @@ module C = struct
     | C_InlineRevStatements sl -> Printf.sprintf "/*FIXME:inline*/{\n%s\n}" (rev_statements_to_string sl)
     | C_IntLiteral i -> string_of_int i
     | C_PointerLiteral i -> Printf.sprintf "((void*)%d)" i
-    | C_StringLiteral str -> Printf.sprintf "\"%s\"" (String.concat "\\\"" (string_split_on_char '"' str))
+    | C_StringLiteral str -> Printf.sprintf "%S" str
+    | C_CharLiteral ch -> Printf.sprintf "%C" ch
     | C_GlobalVariable id -> Ident.name id
     | C_Variable id -> Ident.unique_name id
     | C_ArrayIndex (e,Some i) -> Printf.sprintf "%s[%d]" (expression_to_string e) i
@@ -185,6 +187,7 @@ let compile_implementation modulename lambda =
 
   let rec structured_constant_to_expression = function
     | Const_base (Const_int n) -> C_IntLiteral n
+    | Const_base (Const_char ch) -> C_CharLiteral ch
     | Const_base (Const_string (s, None)) -> C_StringLiteral s (* FIXME: MUTABLE STRING, SHOULD NOT BE SHARED/just a literal *)
     | Const_pointer n -> C_PointerLiteral n
     | Const_immstring str -> C_StringLiteral str (* immediate/immutable string *)
@@ -365,8 +368,8 @@ let compile_implementation modulename lambda =
         let sl' = fixup_rev_statements ((C_VarDeclare (C_TODO, C_Variable id, None))::accum) sl in
         let sl'' = assign_last_value_of_statement id sl' in
         sl'', C_Variable id
-    | C_IntLiteral _ | C_PointerLiteral _ | C_StringLiteral _ | C_Variable _
-    | C_GlobalVariable _ | C_Allocate _ -> accum, e
+    | C_IntLiteral _ | C_PointerLiteral _ | C_StringLiteral _ | C_CharLiteral _
+    | C_Variable _ | C_GlobalVariable _ | C_Allocate _ -> accum, e
     | C_ArrayIndex (e,i) -> let (accum', e') = fixup_expression accum e in accum', C_ArrayIndex (e',i)
     | C_Cast (ty,e) -> let (accum', e') = fixup_expression accum e in accum', C_Cast (ty,e')
     | C_BinaryOp (ty,e1,e2) ->
