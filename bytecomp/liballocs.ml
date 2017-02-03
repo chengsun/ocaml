@@ -42,12 +42,14 @@ module C = struct
     | C_Return of expression option
 
   type toplevel =
+    | C_TopLevelComment of string
     | C_GlobalDefn of ctype * expression * expression option
     | C_ExternDecl of ctype * expression
     | C_FunDefn of ctype * expression * (ctype * Ident.t) list * statement list option
 
   let rec map_toplevel f t =
     match t with
+    | C_TopLevelComment _ -> t
     | C_GlobalDefn _ -> t
     | C_ExternDecl _ -> t
     | C_FunDefn (ct,e,args,Some sl) -> C_FunDefn (ct,e,args,Some (f sl))
@@ -137,6 +139,7 @@ module C = struct
   and rev_statements_to_string sl = map_intersperse_concat statement_to_string "\n" (List.rev sl)
 
   let toplevel_to_string = function
+    | C_TopLevelComment str -> "/*\n" ^ str ^ "\n*/"
     | C_GlobalDefn (t,id,e_option) ->
         (ctype_to_string t) ^ " " ^ (expression_to_string id) ^
         (match e_option with
@@ -442,5 +445,7 @@ let compile_implementation modulename lambda =
         ]
       ) !globals)
   in
-  global_decls @ fixed_toplevels @ [the_module_constructor]
+  [C_TopLevelComment "global decls:"] @ global_decls @
+  [C_TopLevelComment "fixed toplevels:"] @ fixed_toplevels @
+  [C_TopLevelComment "the module constructor:" ; the_module_constructor]
 
