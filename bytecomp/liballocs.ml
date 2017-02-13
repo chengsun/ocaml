@@ -1,4 +1,4 @@
-[@@@ocaml.warning "-32-33-37-39-27"]
+[@@@ocaml.warning "-32-33-37-39-27-26"]
 
 open Asttypes
 open Primitive
@@ -21,6 +21,7 @@ module C = struct
 
   type expression =
     | C_InlineRevStatements of statement list (* putting a statement where an expression belongs; this needs to be extracted in a later pass *)
+    | C_InlineFunDefn of expression * (ctype * Ident.t) list * statement list
     | C_IntLiteral of int
     | C_PointerLiteral of int
     | C_StringLiteral of string
@@ -105,6 +106,10 @@ module C = struct
 
   let rec expression_to_string = function
     | C_InlineRevStatements sl -> Printf.sprintf "/*FIXME:inline*/{\n%s\n}" (rev_statements_to_string sl)
+    | C_InlineFunDefn (name, args, sl) -> Printf.sprintf "/*FIXME:inline fun %s (%s)*/{\n%s\n}"
+                              (expression_to_string name)
+                              (map_intersperse_concat (fun (t,id) -> (ctype_to_string t) ^ " " ^ (Ident.unique_name id)) ", " args)
+                              (rev_statements_to_string sl)
     | C_IntLiteral i -> string_of_int i
     | C_PointerLiteral i -> Printf.sprintf "((void*)%d)" i
     | C_StringLiteral str -> Printf.sprintf "%S" str
@@ -213,7 +218,35 @@ let compile_implementation modulename lambda =
 
   let globals = ref [] in
 
-  let rec lambda_to_expression env lam =
+  let rec let_args_to_expression env id lam =
+    match lam with
+    | Levent (body, ev) ->
+        let_args_to_expression (Envaux.env_from_summary ev.lev_env Subst.identity) id body
+    | Lfunction { params ; body } ->
+        Printf.printf "Got a fun LET %s\n%!" (expression_to_string id);
+        let typedparams = List.map (fun id ->
+            (*ENV
+              Printf.printf "We have these in env: %s\n%!" (dumps_env env);
+              Printf.printf "Looking up type of %s\n%!" (Ident.unique_name id);
+              let (p, ty) = Env.lookup_value (Longident.Lident (Ident.name id)) env in
+              C_Boxed ty.val_type, id
+            *)
+            C_Boxed, id
+          ) params in
+        let cbody_rev =
+          match lambda_to_rev_statements env body with
+          | [] -> failwith "let_args_to_toplevels: empty function?"
+          | (C_Expression laste)::bodytl -> (C_Return (Some laste))::bodytl
+          | cbody_rev ->
+              (* TODO: check return type is void *)
+              cbody_rev
+        in
+        C_InlineFunDefn (id, typedparams, cbody_rev)
+    | _ ->
+        lambda_to_expression env lam
+
+
+  and lambda_to_expression env lam : C.expression =
     match lam with
     | Levent (body, ev) ->
         lambda_to_expression (Envaux.env_from_summary ev.lev_env Subst.identity) body
@@ -290,6 +323,10 @@ let compile_implementation modulename lambda =
         lambda_to_rev_statements (Envaux.env_from_summary ev.lev_env Subst.identity) body
     | Lvar _ | Lconst _ | Lprim _ | Lapply _ ->
         [C_Expression (lambda_to_expression env lam)]
+    | Llet (_strict, id, args, body) ->
+        (lambda_to_rev_statements env body) @
+        [C_VarDeclare (C_TODO, C_Variable id,
+                       Some (let_args_to_expression env (C_Variable id) args))]
     | Lsequence (l1, l2) ->
         (lambda_to_rev_statements env l2) @ (lambda_to_rev_statements env l1)
     | Lifthenelse (l,lt,lf) ->
@@ -301,7 +338,7 @@ let compile_implementation modulename lambda =
 
   let static_constructors = ref [] in
 
-  let rec let_args_to_toplevels env id lam =
+  let rec let_args_to_toplevels env id lam = (* FIXME: get rid of this soon! *)
     match lam with
     | Levent (body, ev) ->
         let_args_to_toplevels (Envaux.env_from_summary ev.lev_env Subst.identity) id body
@@ -316,25 +353,15 @@ let compile_implementation modulename lambda =
             *)
             C_Boxed, id
           ) params in
-        let cbody_rev =
-          match lambda_to_rev_statements env body with
-          | [] -> failwith "let_args_to_toplevels: empty function?"
-          | (C_Expression laste)::bodytl -> (C_Return (Some laste))::bodytl
-          | cbody_rev ->
-              (* TODO: check return type is void *)
-              cbody_rev
+        let cbody =
+          C_Return (Some (C_InlineRevStatements (lambda_to_rev_statements env body)))
         in
-        [C_FunDefn (C_Boxed, id, typedparams, Some cbody_rev)]
+        [C_FunDefn (C_Boxed, id, typedparams, Some [cbody])]
     | _ ->
-        let cbody_rev =
-          match lambda_to_rev_statements env lam with
-          | [] -> failwith "let_args_to_toplevels: empty let body?"
-          | (C_Expression laste)::bodytl -> (C_Assign (id, laste))::bodytl
-          | cbody_rev ->
-              (* TODO: check return type is void *)
-              cbody_rev
+        let cbody =
+          C_Assign (id, C_InlineRevStatements (lambda_to_rev_statements env lam))
         in
-        static_constructors := cbody_rev @ !static_constructors;
+        static_constructors := cbody :: !static_constructors;
         [ C_GlobalDefn (C_TODO, id, None) ]
   in
 
@@ -344,6 +371,9 @@ let compile_implementation modulename lambda =
         lambda_to_toplevels module_id (Envaux.env_from_summary ev.lev_env Subst.identity) body
     | Llet (_strict, id, args, body) ->
         Printf.printf "Got a LET %s\n%!" (Ident.unique_name id);
+        (let_args_to_toplevels env (C_Variable id) args) @ (lambda_to_toplevels module_id env body)
+    | Lletrec ([id, args], body) ->
+        Printf.printf "Got a LETREC %s\n%!" (Ident.unique_name id);
         (let_args_to_toplevels env (C_Variable id) args) @ (lambda_to_toplevels module_id env body)
     | Lsequence (l1, l2) -> (* TODO: dedup this... *)
         let cbody_rev = lambda_to_rev_statements env l1 in
@@ -359,6 +389,7 @@ let compile_implementation modulename lambda =
   in
 
 
+  let deinlined_funs = ref [] in (* TODO: one day we want them to be attached near their users *)
 
   let rec fixup_expression accum e = (* sticks inlined statements on the front of accum *)
     match e with
@@ -371,6 +402,9 @@ let compile_implementation modulename lambda =
         let sl' = fixup_rev_statements ((C_VarDeclare (C_TODO, C_Variable id, None))::accum) sl in
         let sl'' = assign_last_value_of_statement id sl' in
         sl'', C_Variable id
+    | C_InlineFunDefn (name, args, sl) ->
+        deinlined_funs := (C_FunDefn (C_TODO, name, args, Some sl)) :: !deinlined_funs;
+        accum, name
     | C_IntLiteral _ | C_PointerLiteral _ | C_StringLiteral _ | C_CharLiteral _
     | C_Variable _ | C_GlobalVariable _ | C_Allocate _ -> accum, e
     | C_ArrayIndex (e,i) -> let (accum', e') = fixup_expression accum e in accum', C_ArrayIndex (e',i)
@@ -399,7 +433,8 @@ let compile_implementation modulename lambda =
         accum', C_FunCall (id,es')
 
   and fixup_rev_statements accum sl = (* sticks fixed up sl on the front of accum *)
-    let rec loop accum = function
+    let rec loop_start accum xs = loop accum (List.rev xs)
+    and loop accum = function
       | [] -> accum
       | s::statements ->
           let accum'' =
@@ -408,13 +443,13 @@ let compile_implementation modulename lambda =
             | C_VarDeclare (ty,eid,None) -> C_VarDeclare (ty,eid,None) :: accum
             | C_VarDeclare (ty,eid,Some e) -> let (accum', e') = fixup_expression accum e in C_VarDeclare (ty,eid,Some e') :: accum'
             | C_Assign (eid,e) -> let (accum', e') = fixup_expression accum e in C_Assign (eid,e') :: accum'
-            | C_If (e,slt,slf) -> let (accum', e') = fixup_expression accum e in (C_If (e', loop [] slt, loop [] slf)) :: accum'
+            | C_If (e,slt,slf) -> let (accum', e') = fixup_expression accum e in (C_If (e', loop_start [] slt, loop_start [] slf)) :: accum'
             | C_Return (None) -> C_Return (None) :: accum
             | C_Return (Some e) -> let (accum', e') = fixup_expression accum e in (C_Return (Some e')) :: accum'
           in
           loop accum'' statements
     in
-    loop accum (List.rev sl)
+    loop_start accum sl
   in
 
 
@@ -446,6 +481,7 @@ let compile_implementation modulename lambda =
       ) !globals)
   in
   [C_TopLevelComment "global decls:"] @ global_decls @
+  [C_TopLevelComment "deinlined functions:"] @ !deinlined_funs @
   [C_TopLevelComment "fixed toplevels:"] @ fixed_toplevels @
   [C_TopLevelComment "the module constructor:" ; the_module_constructor]
 
