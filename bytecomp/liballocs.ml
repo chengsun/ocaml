@@ -8,7 +8,7 @@ open Types
 module C = struct
   type ctype =
     | C_Pointer of ctype
-    | C_Boxed
+    | C_Boxed (* the union boxed_pointer_t *)
     | C_Void
     | C_Int
     | C_UInt
@@ -19,6 +19,7 @@ module C = struct
     | C_VarArgs
 
   type expression =
+    | C_Blob of (string * expression * string)
     | C_InlineRevStatements of statement list (* putting a statement where an expression belongs; this needs to be extracted in a later pass *)
     | C_InlineFunDefn of expression * (ctype * Ident.t) list * statement list
     | C_IntLiteral of int
@@ -81,7 +82,7 @@ module C = struct
 
   let rec ctype_to_string = function
     | C_Pointer cty -> (ctype_to_string cty) ^ "*"
-    | C_Boxed -> "intptr_t*"
+    | C_Boxed -> "boxed_pointer_t"
     | C_Void -> "void"
     | C_Int -> "intptr_t"
     | C_UInt -> "unsigned"
@@ -103,6 +104,7 @@ module C = struct
     String.sub s 0 !j :: !r
 
   let rec expression_to_string = function
+    | C_Blob (s1, e, s2) -> Printf.sprintf "%s%s%s" s1 (expression_to_string e) s2
     | C_InlineRevStatements sl -> Printf.sprintf "/*FIXME:inline*/{\n%s\n}" (rev_statements_to_string sl)
     | C_InlineFunDefn (name, args, sl) -> Printf.sprintf "/*FIXME:inline fun %s (%s)*/{\n%s\n}"
                               (expression_to_string name)
@@ -121,7 +123,7 @@ module C = struct
     | C_BinaryOp (op,x,y) -> "(" ^ (expression_to_string x) ^ op ^ (expression_to_string y) ^ ")"
     | C_FunCall (e_id,es) ->
         (expression_to_string e_id) ^ "(" ^ (map_intersperse_concat expression_to_string ", " es) ^ ")"
-    | C_Allocate n -> Printf.sprintf "malloc(sizeof(intptr_t)*%d)" n
+    | C_Allocate n -> Printf.sprintf "malloc(sizeof(%s)*%d)" (ctype_to_string C_Boxed) n
 
   and statement_to_string = function
     | C_Expression e -> (expression_to_string e) ^ ";"
@@ -163,6 +165,7 @@ end
 module Emitcode = struct
   let to_file oc _modulename _filename c_code =
     output_string oc "#include <stdlib.h>\n#include <stdint.h>\n";
+    output_string oc "#include \"liballocs.h\"\n";
     output_string oc "\n";
     List.iter (fun t ->
         output_string oc (C.toplevel_to_string t);
@@ -188,9 +191,18 @@ let dumps_env env =
       Printf.sprintf "%s\n%s : %s" accum s (formats Printtyp.type_expr vd.val_type)) None env ""
 
 
-
 let compile_implementation modulename lambda =
+  let make_boxed_d e =
+      C_Cast (C_Boxed,
+        (C_InitialiserList [ (* TODO: rewrite -- this is disgusting *)
+          C_Blob (".d = ", e, "")
+         ]))
+  in
+  (* TODO: rewrite -- this is disgusting *)
+  let get_boxed_d e = C_Blob ("", e, ".d") in
+  let get_boxed_f e = C_Blob ("", e, ".f") in
 
+  (* Translates a structured constant into an expression of ctype boxed_pointer_t* *)
   let rec structured_constant_to_expression = function
     | Const_base (Const_int n) -> C_IntLiteral n
     | Const_base (Const_char ch) -> C_CharLiteral ch
@@ -198,15 +210,21 @@ let compile_implementation modulename lambda =
     | Const_pointer n -> C_PointerLiteral n
     | Const_immstring str -> C_StringLiteral str (* immediate/immutable string *)
     | Const_block (tag, scl) ->
+        (* create a __structured_constant of type boxed_pointer_t* *)
         let id = Ident.create "__structured_constant" in
+        let var = C_Variable id in
         let rec construct k statements = function
-          | [] -> (C_Expression (C_Variable id)) :: statements
+          | [] -> (C_Expression var) :: statements
           | sc_head::scl ->
-              let s = structured_constant_to_expression sc_head in
-              construct (succ k) ((C_Assign (C_ArrayIndex (C_Variable id, Some k),s))::statements) scl
+              let s = make_boxed_d (structured_constant_to_expression sc_head) in
+              let elem = C_ArrayIndex (var, Some k) in
+              let assign = C_Assign (elem, s) in
+              construct (succ k)
+                  (assign::statements)
+                  scl
         in
         C_InlineRevStatements (construct 0 [
-            C_VarDeclare (C_Boxed, C_Variable id,
+            C_VarDeclare (C_Pointer C_Boxed, var,
                           Some (C_Allocate (List.length scl)))
           ] scl)
     | _ -> failwith "constant_to_expression: unknown constant type"
@@ -262,14 +280,17 @@ let compile_implementation modulename lambda =
           | Pfield i, [lam] -> C_ArrayIndex (lambda_to_expression env lam, Some i)
           | Pmakeblock (tag, mut), contents ->
               let id = Ident.create "__makeblock" in
+              let var = C_Variable id in
               let rec construct k statements = function (* TODO: this construct is almost identical to that in structured_constant_to_expression::Const_block *)
-                | [] -> (C_Expression (C_Variable id)) :: statements
+                | [] -> (C_Expression var) :: statements
                 | e_head::el ->
                     let s = lambda_to_expression env e_head in
-                    construct (succ k) ((C_Assign (C_ArrayIndex (C_Variable id, Some k),s))::statements) el
+                    let elem = C_ArrayIndex (var, Some k) in
+                    let assign = C_Assign (elem,s) in
+                    construct (succ k) (assign::statements) el
               in
               C_InlineRevStatements (construct 0 [
-                  C_VarDeclare (C_Boxed, C_Variable id,
+                  C_VarDeclare (C_Pointer C_Boxed, C_Variable id,
                                 Some (C_Allocate (List.length contents)))
                 ] contents)
           | Psequand, [e1;e2] -> bop "&&" e1 e2
@@ -305,7 +326,7 @@ let compile_implementation modulename lambda =
           then C_FunPointer (C_Boxed, [C_Boxed; C_VarArgs])
           else C_FunPointer (C_Boxed, List.map (fun _ -> C_Boxed) ap_args)
         in
-        C_FunCall (C_Cast (ty, lambda_to_expression env e_id),
+        C_FunCall (C_Cast (ty, get_boxed_f (lambda_to_expression env e_id)),
                    List.map (lambda_to_expression env) ap_args)
     | Lifthenelse _ ->
         C_InlineRevStatements (lambda_to_rev_statements env lam)
@@ -404,6 +425,7 @@ let compile_implementation modulename lambda =
         accum, name
     | C_IntLiteral _ | C_PointerLiteral _ | C_StringLiteral _ | C_CharLiteral _
     | C_Variable _ | C_GlobalVariable _ | C_Allocate _ -> accum, e
+    | C_Blob (s1,e,s2) -> let (accum', e') = fixup_expression accum e in accum', C_Blob (s1,e',s2)
     | C_ArrayIndex (e,i) -> let (accum', e') = fixup_expression accum e in accum', C_ArrayIndex (e',i)
     | C_Cast (ty,e) -> let (accum', e') = fixup_expression accum e in accum', C_Cast (ty,e')
     | C_BinaryOp (ty,e1,e2) ->
