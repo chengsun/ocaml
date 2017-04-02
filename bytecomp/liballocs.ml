@@ -4,6 +4,7 @@ open Asttypes
 open Primitive
 open Format
 open Types
+open Lambda
 
 let formats f x =
   let b = Buffer.create 16 in
@@ -18,7 +19,6 @@ let dumps_lambda lam =
 let dumps_env env =
   Env.fold_values (fun s p vd accum ->
       Printf.sprintf "%s\n%s : %s" accum s (formats Printtyp.type_expr vd.val_type)) None env ""
-
 
 
 module C = struct
@@ -194,7 +194,6 @@ module Emitcode = struct
 end
 
 open C
-open Lambda
 
 let compile_implementation modulename lambda =
   let make_boxed_d e =
@@ -206,34 +205,6 @@ let compile_implementation modulename lambda =
   (* TODO: rewrite -- this is disgusting *)
   let get_boxed_d e = C_Blob ("", e, ".d") in
   let get_boxed_f e = C_Blob ("", e, ".f") in
-
-  (* Translates a structured constant into an expression of ctype boxed_pointer_t* *)
-  let rec structured_constant_to_expression = function
-    | Const_base (Const_int n) -> C_IntLiteral n
-    | Const_base (Const_char ch) -> C_CharLiteral ch
-    | Const_base (Const_string (s, None)) -> C_StringLiteral s (* FIXME: MUTABLE STRING, SHOULD NOT BE SHARED/just a literal *)
-    | Const_pointer n -> C_PointerLiteral n
-    | Const_immstring str -> C_StringLiteral str (* immediate/immutable string *)
-    | Const_block (tag, scl) ->
-        (* create a __structured_constant of type boxed_pointer_t* *)
-        let id = Ident.create "__structured_constant" in
-        let var = C_Variable id in
-        let rec construct k statements = function
-          | [] -> (C_Expression var) :: statements
-          | sc_head::scl ->
-              let s = make_boxed_d (structured_constant_to_expression sc_head) in
-              let elem = C_ArrayIndex (var, Some k) in
-              let assign = C_Assign (elem, s) in
-              construct (succ k)
-                  (assign::statements)
-                  scl
-        in
-        C_InlineRevStatements (construct 0 [
-            C_VarDeclare (C_Pointer C_Boxed, var,
-                          Some (C_Allocate (List.length scl, Error "liballocs struct_constant Const_block")))
-          ] scl)
-    | _ -> failwith "constant_to_expression: unknown constant type"
-  in
 
   let module_initialiser_name module_id = Ident.create ((Ident.name module_id) ^ "__init") in
 
@@ -262,6 +233,19 @@ let compile_implementation modulename lambda =
         C_VarDeclare (C_Boxed, id, Some (lambda_to_expression env lam))
 
 
+  (* Translates a structured constant into an expression of ctype boxed_pointer_t* *)
+  and structured_constant_to_expression env = function
+    | Const_base (Const_int n) -> C_IntLiteral n
+    | Const_base (Const_char ch) -> C_CharLiteral ch
+    | Const_base (Const_string (s, None)) -> C_StringLiteral s (* FIXME: MUTABLE STRING, SHOULD NOT BE SHARED/just a literal *)
+    | Const_pointer n -> C_PointerLiteral n
+    | Const_immstring str -> C_StringLiteral str (* immediate/immutable string *)
+    | Const_block (tag, scl) ->
+      lambda_to_expression env (Lprim
+        (Pmakeblock (tag, Asttypes.Immutable, Error "structured_constant_to_expression"),
+        List.map (fun x -> Lconst x) scl))
+      (* we'll recurse back into this function eventually *)
+    | _ -> failwith "structured_constant_to_expression: unknown constant type"
 
   and lambda_to_expression env lam : C.expression =
     match lam with
@@ -286,7 +270,7 @@ let compile_implementation modulename lambda =
           | Pmakeblock (tag, mut, tyinfo), contents ->
               let id = Ident.create "__makeblock" in
               let var = C_Variable id in
-              let rec construct k statements = function (* TODO: this construct is almost identical to that in structured_constant_to_expression::Const_block *)
+              let rec construct k statements = function
                 | [] -> (C_Expression var) :: statements
                 | e_head::el ->
                     let s = lambda_to_expression env e_head in
@@ -317,7 +301,7 @@ let compile_implementation modulename lambda =
           | Pintcomp(Cge), [e1;e2] -> int_bop ">=" e1 e2
           | _ -> failwith ("lambda_to_expression Lprim " ^ (Printlambda.name_of_primitive prim))
         end
-    | Lconst sc -> structured_constant_to_expression sc (* TODO: share constants, and construct at compile time *)
+    | Lconst sc -> structured_constant_to_expression env sc
     | Lvar id -> C_Variable id
     | Lapply { ap_func = e_id ; ap_args } ->
         (* FIXME: hardcoded for printf *)
@@ -510,3 +494,4 @@ let compile_implementation modulename lambda =
   [C_TopLevelComment "fixed toplevels:"] @ fixed_toplevels @
   [C_TopLevelComment "the module constructor:" ; the_module_constructor]
 
+;;
