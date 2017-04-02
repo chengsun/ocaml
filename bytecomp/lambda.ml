@@ -51,7 +51,7 @@ type primitive =
   | Pgetglobal of Ident.t
   | Psetglobal of Ident.t
   (* Operations on heap blocks *)
-  | Pmakeblock of int * mutable_flag * (Types.type_desc, string) result
+  | Pmakeblock of int * mutable_flag * (Types.type_expr, string) result
   | Pfield of int
   | Psetfield of int * immediate_or_pointer * initialization_or_assignment
   | Pfloatfield of int

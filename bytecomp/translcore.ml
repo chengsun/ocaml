@@ -797,7 +797,7 @@ and transl_exp0 e =
       begin try
         Lconst(Const_block(0, List.map extract_constant ll))
       with Not_constant ->
-        Lprim(Pmakeblock(0, Immutable, Ok(Ttuple(List.map (fun e -> e.exp_type) el))), ll)
+        Lprim(Pmakeblock(0, Immutable, Ok(Btype.newty2 0 (Ttuple(List.map (fun e -> e.exp_type) el)))), ll)
       end
   | Texp_construct(_, cstr, args) ->
       let ll = transl_list args in

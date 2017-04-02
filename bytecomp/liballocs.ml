@@ -5,6 +5,22 @@ open Primitive
 open Format
 open Types
 
+let formats f x =
+  let b = Buffer.create 16 in
+  let fo = formatter_of_buffer b in
+  f fo x;
+  pp_print_flush fo ();
+  Buffer.contents b
+
+let dumps_lambda lam =
+  formats Printlambda.lambda lam
+
+let dumps_env env =
+  Env.fold_values (fun s p vd accum ->
+      Printf.sprintf "%s\n%s : %s" accum s (formats Printtyp.type_expr vd.val_type)) None env ""
+
+
+
 module C = struct
   type ctype =
     | C_Pointer of ctype
@@ -33,7 +49,7 @@ module C = struct
     | C_Cast of ctype * expression
     | C_BinaryOp of string * expression * expression
     | C_FunCall of expression * expression list
-    | C_Allocate of int (* number of words *) * (Types.type_desc, string) result
+    | C_Allocate of int (* number of words *) * (Types.type_expr, string) result
 
   and statement =
     | C_Expression of expression
@@ -125,7 +141,7 @@ module C = struct
         (expression_to_string e_id) ^ "(" ^ (map_intersperse_concat expression_to_string ", " es) ^ ")"
     | C_Allocate (n, tyinfo) -> Printf.sprintf "malloc(sizeof(%s)*%d /*%s*/)" (ctype_to_string C_Boxed) n
             (match tyinfo with
-             | Ok desc -> "got some type info!"
+             | Ok expr -> formats Printtyp.type_expr expr
              | Error s -> Printf.sprintf "NO TYPE INFO: %s" s
             )
 
@@ -179,21 +195,6 @@ end
 
 open C
 open Lambda
-
-let formats f x =
-  let b = Buffer.create 16 in
-  let fo = formatter_of_buffer b in
-  f fo x;
-  pp_print_flush fo ();
-  Buffer.contents b
-
-let dumps_lambda lam =
-  formats Printlambda.lambda lam
-
-let dumps_env env =
-  Env.fold_values (fun s p vd accum ->
-      Printf.sprintf "%s\n%s : %s" accum s (formats Printtyp.type_expr vd.val_type)) None env ""
-
 
 let compile_implementation modulename lambda =
   let make_boxed_d e =
