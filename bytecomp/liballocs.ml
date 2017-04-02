@@ -33,7 +33,7 @@ module C = struct
     | C_Cast of ctype * expression
     | C_BinaryOp of string * expression * expression
     | C_FunCall of expression * expression list
-    | C_Allocate of int (* number of words *)
+    | C_Allocate of int (* number of words *) * (Types.type_desc, string) result
 
   and statement =
     | C_Expression of expression
@@ -123,7 +123,11 @@ module C = struct
     | C_BinaryOp (op,x,y) -> "(" ^ (expression_to_string x) ^ op ^ (expression_to_string y) ^ ")"
     | C_FunCall (e_id,es) ->
         (expression_to_string e_id) ^ "(" ^ (map_intersperse_concat expression_to_string ", " es) ^ ")"
-    | C_Allocate n -> Printf.sprintf "malloc(sizeof(%s)*%d)" (ctype_to_string C_Boxed) n
+    | C_Allocate (n, tyinfo) -> Printf.sprintf "malloc(sizeof(%s)*%d /*%s*/)" (ctype_to_string C_Boxed) n
+            (match tyinfo with
+             | Ok desc -> "got some type info!"
+             | Error s -> Printf.sprintf "NO TYPE INFO: %s" s
+            )
 
   and statement_to_string = function
     | C_Expression e -> (expression_to_string e) ^ ";"
@@ -225,7 +229,7 @@ let compile_implementation modulename lambda =
         in
         C_InlineRevStatements (construct 0 [
             C_VarDeclare (C_Pointer C_Boxed, var,
-                          Some (C_Allocate (List.length scl)))
+                          Some (C_Allocate (List.length scl, Error "liballocs struct_constant Const_block")))
           ] scl)
     | _ -> failwith "constant_to_expression: unknown constant type"
   in
@@ -278,7 +282,7 @@ let compile_implementation modulename lambda =
           | Popaque, [lam] -> C_InlineRevStatements (lambda_to_rev_statements env lam)
           | Pgetglobal id, [] -> C_GlobalVariable id
           | Pfield i, [lam] -> C_ArrayIndex (lambda_to_expression env lam, Some i)
-          | Pmakeblock (tag, mut), contents ->
+          | Pmakeblock (tag, mut, tyinfo), contents ->
               let id = Ident.create "__makeblock" in
               let var = C_Variable id in
               let rec construct k statements = function (* TODO: this construct is almost identical to that in structured_constant_to_expression::Const_block *)
@@ -291,7 +295,7 @@ let compile_implementation modulename lambda =
               in
               C_InlineRevStatements (construct 0 [
                   C_VarDeclare (C_Pointer C_Boxed, C_Variable id,
-                                Some (C_Allocate (List.length contents)))
+                                Some (C_Allocate (List.length contents, tyinfo)))
                 ] contents)
           | Psequand, [e1;e2] -> bop "&&" e1 e2
           | Psequor, [e1;e2] -> bop "||" e1 e2
@@ -396,7 +400,8 @@ let compile_implementation modulename lambda =
         let cbody_rev = lambda_to_rev_statements env l1 in
         static_constructors := cbody_rev @ !static_constructors;
         lambda_to_toplevels module_id env l2
-    | Lprim (Pmakeblock(tag, Immutable), largs) ->
+    | Lprim (Pmakeblock(tag, Immutable, tyinfo), largs) ->
+        (* TODO: why do we not use tyinfo here? *)
         (* immutable makeblock at the toplevel: add module export table init code *)
         let es = lambda_to_expression env lam in
         let export_var = C_GlobalVariable module_id in
