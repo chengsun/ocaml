@@ -72,6 +72,62 @@ module C = struct
     | C_FunDefn (ct,e,args,Some sl) -> C_FunDefn (ct,e,args,Some (f sl))
     | C_FunDefn _ -> t
 
+
+  module TypeLibrary = struct
+    (* the payload of data we want with each type_expr *)
+    let t = ctype
+
+    module TypeHash = Hashtbl.Make(Types.TypeOps)
+    let table: (Types.type_expr, t) TypeHash.t = TypeHash.create 16
+
+    let rec tfield_to_list = function
+      | Tfield (name, Fpresent, t, ts) -> (name, t) :: (tfield_to_list ts)
+      | Tnil -> []
+      | _ -> failwith "unexpected type_desc type in Tobject field list"
+
+    let add_structlike_mapping name_hint ts =
+      let struct_name = Ident.create name_hint in
+      let ctype =
+        C_Struct (struct_name, (List.map (fun (fieldname, fieldtype) ->
+          ocaml_to_c_type fieldtype, Ident.create fieldname) ts))
+      in
+      table.add table type_expr ctype;
+      ctype
+
+    and add_mapping type_expr = function
+      | Ttuple ts -> add_structlike_mapping "tuple" (List.mapi (fun i t -> (Printf.sprintf "_%d" i+1), t) ts)
+      | Tobject (ts, None) -> add_structlike_mapping "struct" (tfield_to_list ts)
+      | _ -> failwith "unexpected type_expr to add mapping for"
+
+    and ocaml_to_c_type type_expr =
+      match type_expr.desc with
+      | Tvar _ -> C_Boxed
+      | Tarrow _ -> C_FunPointer (C_Void, []) (* TODO: could add more detail *)
+      | Tconstr _ -> C_Boxed (* TODO: who knows? *)
+      | Ttuple _
+      | Tobject _ ->
+          begin match table.find table type_expr with
+          | Some x -> x
+          | None -> add_mapping type_expr
+          end
+      | Tfield _ | Tnil -> failwith "unexpected Tfield/Tnil at top level"
+      | Tlink _e
+      | Tsubst _e -> failwith "unexpected Tlink/Tsubst" (* ocaml_to_c_type e probably? *)
+      | Tvariant _ -> failwith "really need to handle Tvariant" (* TODO *)
+      | Tunivar _ | Tpoly _ | Tpackage _ -> failwith "type which i have no idea"
+
+
+    (* get all struct declarations so far *)
+    let dump_all_typedefns_str () =
+      TypeHash.fold (fun k v acc -> acc ^ "\n\n" ^ (dump_typedefn_str k v)) table ""
+
+    (* get a struct declaration for a type that needs it. *)
+    let rec typedecl_string type_expr =
+      a
+  end
+
+
+
   let rec assign_last_value_of_statement id sl = (* for extracting C_InlineRevStatements *)
     let f e = C_Assign (C_Variable id, e) in
     match sl with
@@ -107,6 +163,18 @@ module C = struct
     | C_Struct (id, _) -> "struct " ^ (Ident.unique_name id)
     | C_FunPointer (tyret, tyargs) -> Printf.sprintf "%s(*)(%s)" (ctype_to_string tyret) (map_intersperse_concat ctype_to_string "," tyargs)
     | C_VarArgs -> "..."
+
+  let cstruct_defn_string id fields = fun
+    let fieldstrings =
+      map_intersperse_concat (fun (ctype, fieldid) ->
+        Printf.sprintf "%s %s;" (ctype_to_string ctype) (Ident.unique_name fieldid)
+      ) "\n" fields
+    in
+    Printf.sprintf "struct %s {\n%s\n};\n" (Ident.unique_name id) fieldstrings
+
+  let ctype_defn_string = function
+    | C_Struct (id, fields) -> cstruct_defn_string id fields
+    | _ -> failwith "unexpected attempt to define non-struct ctype"
 
   let string_split_on_char sep s =
     let r = ref [] in
