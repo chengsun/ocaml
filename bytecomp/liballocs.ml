@@ -50,7 +50,7 @@ module C = struct
 
   type expression =
     | C_Blob of (string * expression * string)
-    | C_InlineRevStatements of statement list (* putting a statement where an expression belongs; this needs to be extracted in a later pass *)
+    | C_InlineRevStatements of ctype * statement list (* putting a statement where an expression belongs; this needs to be extracted in a later pass. ctype necessary annotation *)
     | C_InlineFunDefn of expression * (ctype * Ident.t) list * statement list
     | C_IntLiteral of int
     | C_PointerLiteral of int
@@ -125,6 +125,25 @@ module C = struct
         (* TODO: rewrite -- this is disgusting *)
         C_Blob (Printf.sprintf "{ .%s = " (box_kind st), source_cexpr, " }"))
     ) else failwith "unreachable"
+
+
+
+  (* for extracting C_InlineRevStatements. assigns the final expression to the
+   * variable [id] *)
+  let rec assign_last_value_of_statement (tgt_type,id) (src_type,sl) =
+    let f e = C_Assign (C_Variable id, cast tgt_type (src_type, e)) in
+    match sl with
+    | [] -> failwith "assign_last_value_of_statement: empty sl" (* TODO: unit? *)
+    | s::sl ->
+        begin
+          match s with
+          | C_Expression e -> f e :: sl
+          | C_VarDeclare _ -> failwith "assign_last_value_of_statement: unexpected C_VarDeclare as last statement in sl"
+          | C_Assign (varid,e) -> f varid :: C_Assign (varid,e) :: sl
+          | C_If (e,slt, slf) -> C_If (e, assign_last_value_of_statement (tgt_type,id) (src_type,slt), assign_last_value_of_statement (tgt_type,id) (src_type,slf)) :: sl
+          | C_Return _ -> failwith "assign_last_value_of_statement: unexpected C_Return as last statement in sl"
+        end
+
 end
 
 open C
@@ -236,7 +255,7 @@ module Emitcode = struct
 
   let rec expression_to_string = function
     | C_Blob (s1, e, s2) -> Printf.sprintf "%s%s%s" s1 (expression_to_string e) s2
-    | C_InlineRevStatements sl -> Printf.sprintf "/*FIXME:inline*/{\n%s\n}" (rev_statements_to_string sl)
+    | C_InlineRevStatements (_, sl) -> Printf.sprintf "/*FIXME:inline*/{\n%s\n}" (rev_statements_to_string sl)
     | C_InlineFunDefn (name, args, sl) -> Printf.sprintf "/*FIXME:inline fun %s (%s)*/{\n%s\n}"
                               (expression_to_string name)
                               (map_intersperse_concat (fun (t,id) -> (ctype_to_string t) ^ " " ^ (Ident.unique_name id)) ", " args)
@@ -332,11 +351,13 @@ let compile_implementation modulename lambda =
 
   let globals = ref [] in
 
-  let rec let_args_to_vardecl env id lam =
+  (* translate a let* to a variable or function declaration *)
+  let rec let_to_rev_statements env id lam =
     match lam with
     | Levent (body, ev) ->
-        let_args_to_vardecl (Envaux.env_from_summary ev.lev_env Subst.identity) id body
+        let_to_rev_statements (Envaux.env_from_summary ev.lev_env Subst.identity) id body
     | Lfunction { params ; body } ->
+        (* NB: let_args_to_toplevels copies this for now, it will go eventually *)
         Printf.printf "Got a expression fun LET %s\n%!" (Emitcode.expression_to_string id);
         let typedparams = List.map (fun id ->
             (*ENV
@@ -347,15 +368,23 @@ let compile_implementation modulename lambda =
             *)
             C_Boxed, id
           ) params in
-        (* TODO: use _ret_type to determine ret type of function*)
-        let _ret_type, rev_st = lambda_to_trev_statements env body in
-        let cbody =
-          C_Return (Some (C_InlineRevStatements rev_st))
+        (* TODO: determine ret type of function*)
+        let ret_type = C_Boxed in
+        let ret_var_id = Ident.create "_return_value" in
+        let rev_st =
+          assign_last_value_of_statement (ret_type, ret_var_id) (lambda_to_trev_statements env body)
         in
-        C_Expression (C_InlineFunDefn (id, typedparams, [cbody]))
+        let cbody =
+          [C_Return (Some (C_Variable ret_var_id))] @
+          rev_st @
+          [C_VarDeclare (ret_type, C_Variable ret_var_id, None)]
+        in
+        [
+          C_Expression (C_InlineFunDefn (id, typedparams, cbody))
+        ]
     | _ ->
         let ctype, defn = lambda_to_texpression env lam in
-        C_VarDeclare (ctype, id, Some (defn))
+        [C_VarDeclare (ctype, id, Some (defn))]
 
 
   (* Translates a structured constant into an expression and its ctype *)
@@ -391,13 +420,13 @@ let compile_implementation modulename lambda =
               (* assume these are declarations of use of external modules; ensure initialisation *)
               globals := id :: !globals;
               C_Pointer C_Boxed, (* all modules are represented as arrays of ocaml_value_t *)
-              C_InlineRevStatements (
+              C_InlineRevStatements (C_Boxed (* all globals are boxed atm *),
                 [ C_Expression (C_GlobalVariable id)
                 ; C_Expression (C_FunCall (C_GlobalVariable (module_initialiser_name id), []))])
           | Popaque, [lam] ->
               (* TODO: can't this be handled recursively? *)
               let ctype, rev_st = lambda_to_trev_statements env lam in
-              ctype, C_InlineRevStatements rev_st
+              ctype, C_InlineRevStatements (ctype, rev_st)
           | Pgetglobal id, [] ->
               (* TODO: make globals typed *)
               C_Boxed, C_GlobalVariable id
@@ -417,9 +446,10 @@ let compile_implementation modulename lambda =
                     let assign = C_Assign (elem,s) in
                     construct (succ k) (assign::statements) el
               in
-              C_Pointer C_Boxed,
-              C_InlineRevStatements (construct 0 [
-                  C_VarDeclare (C_Pointer C_Boxed, C_Variable id,
+              let block_type = C_Pointer C_Boxed in
+              block_type,
+              C_InlineRevStatements (block_type, construct 0 [
+                  C_VarDeclare (block_type, C_Variable id,
                                 Some (do_allocation (List.length contents) tyinfo))
                 ] contents)
           | Psequand, [e1;e2] -> bool_bop "&&" e1 e2
@@ -461,7 +491,7 @@ let compile_implementation modulename lambda =
                             ap_args)
     | Lifthenelse _ ->
         let ctype, rev_st = lambda_to_trev_statements env lam in
-        ctype, C_InlineRevStatements rev_st
+        ctype, C_InlineRevStatements (ctype, rev_st)
     | _ -> failwith ("lambda_to_expression " ^ (formats Printlambda.lambda lam))
 
   and lambda_to_trev_statements env lam =
@@ -473,10 +503,10 @@ let compile_implementation modulename lambda =
         ctype, [C_Expression cexpr]
     | Llet (_strict, id, args, body) ->
         let ctype, rev_st = lambda_to_trev_statements env body in
-        ctype, rev_st @ [let_args_to_vardecl env (C_Variable id) args]
+        ctype, rev_st @ (let_to_rev_statements env (C_Variable id) args)
     | Lletrec ([id, args], body) ->
         let ctype, rev_st = lambda_to_trev_statements env body in
-        ctype, rev_st @ [let_args_to_vardecl env (C_Variable id) args]
+        ctype, rev_st @ (let_to_rev_statements env (C_Variable id) args)
     | Lsequence (l1, l2) ->
         let _ctype1, rev_st1 = lambda_to_trev_statements env l1 in
         let ctype2, rev_st2 = lambda_to_trev_statements env l2 in
@@ -492,7 +522,7 @@ let compile_implementation modulename lambda =
 
   let static_constructors = ref [] in
 
-  let rec let_args_to_toplevels env id lam = (* FIXME: get rid of this soon! *)
+  let rec let_args_to_toplevels env id lam = (* FIXME: get rid of this soon! we can probably handle everything "inline", with toplevels only created at fixup *)
     match lam with
     | Levent (body, ev) ->
         let_args_to_toplevels (Envaux.env_from_summary ev.lev_env Subst.identity) id body
@@ -507,13 +537,22 @@ let compile_implementation modulename lambda =
             *)
             C_Boxed, id
           ) params in
-        let cbody =
-          C_Return (Some (C_InlineRevStatements (snd (lambda_to_trev_statements env body))))
+        (* TODO: determine ret type of function*)
+        let ret_type = C_Boxed in
+        let ret_var_id = Ident.create "_return_value" in
+        let rev_st =
+          assign_last_value_of_statement (ret_type, ret_var_id) (lambda_to_trev_statements env body)
         in
-        [C_FunDefn (C_Boxed, id, typedparams, Some [cbody])]
+        let cbody =
+          [C_Return (Some (C_Variable ret_var_id))] @
+          rev_st @
+          [C_VarDeclare (ret_type, C_Variable ret_var_id, None)]
+        in
+        [C_FunDefn (C_Boxed, id, typedparams, Some cbody)]
     | _ ->
         let cbody =
-          C_Assign (id, C_InlineRevStatements (snd (lambda_to_trev_statements env lam)))
+          let ctype, sl = lambda_to_trev_statements env lam in
+          C_Assign (id, C_InlineRevStatements (ctype, sl))
         in
         static_constructors := cbody :: !static_constructors;
         [ C_GlobalDefn (C_Boxed, id, None) ]
@@ -546,33 +585,16 @@ let compile_implementation modulename lambda =
 
   let deinlined_funs = ref [] in (* TODO: one day we want them to be attached near their users *)
 
-  (* for extracting C_InlineRevStatements. assigns the final expression to the
-   * variable [id] *)
-  let rec assign_last_value_of_statement id sl =
-    let f e = C_Assign (C_Variable id, e) in
-    match sl with
-    | [] -> failwith "assign_last_value_of_statement: empty sl" (* TODO: unit? *)
-    | s::sl ->
-        begin
-          match s with
-          | C_Expression e -> f e :: sl
-          | C_VarDeclare _ -> failwith "assign_last_value_of_statement: unexpected C_VarDeclare as last statement in sl"
-          | C_Assign (varid,e) -> f varid :: C_Assign (varid,e) :: sl
-          | C_If (e,slt, slf) -> C_If (e, assign_last_value_of_statement id slt, assign_last_value_of_statement id slf) :: sl
-          | C_Return _ -> failwith "assign_last_value_of_statement: unexpected C_Return as last statement in sl"
-        end
-  in
-
   let rec fixup_expression accum e = (* sticks inlined statements on the front of accum *)
     match e with
-    | C_InlineRevStatements [] -> failwith "fixup_expression: invalid inlinerevstatements (empty)"
-    | C_InlineRevStatements (C_Expression e::sl) ->
+    | C_InlineRevStatements (_, []) -> failwith "fixup_expression: invalid inlinerevstatements (empty)"
+    | C_InlineRevStatements (_ctype, C_Expression e::sl) ->
         let (accum', e') = fixup_expression accum e in
         (fixup_rev_statements accum' sl), e'
-    | C_InlineRevStatements sl ->
+    | C_InlineRevStatements (ctype,sl) ->
         let id = Ident.create "__deinlined" in
-        let sl' = fixup_rev_statements ((C_VarDeclare (C_Boxed, C_Variable id, None))::accum) sl in
-        let sl'' = assign_last_value_of_statement id sl' in
+        let sl' = fixup_rev_statements ((C_VarDeclare (ctype, C_Variable id, None))::accum) sl in
+        let sl'' = assign_last_value_of_statement (ctype,id) (ctype,sl') in
         sl'', C_Variable id
     | C_InlineFunDefn (name, args, sl) ->
         let sl' = fixup_rev_statements [] sl in
