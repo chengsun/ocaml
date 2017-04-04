@@ -6,15 +6,23 @@ open Format
 open Types
 open Lambda
 
+
+let map_intersperse_concat f sep xs =
+  let rec loop accum = function
+    | [] -> accum
+    | x::xs -> loop (accum ^ sep ^ (f x)) xs
+  in
+  match xs with
+  | [] -> ""
+  | x::xs -> loop (f x) xs
+
+(* uses a formatter [f] to format [x], returned as a string *)
 let formats f x =
   let b = Buffer.create 16 in
   let fo = formatter_of_buffer b in
   f fo x;
   pp_print_flush fo ();
   Buffer.contents b
-
-let dumps_lambda lam =
-  formats Printlambda.lambda lam
 
 let dumps_env env =
   Env.fold_values (fun s p vd accum ->
@@ -138,31 +146,6 @@ module C = struct
       TypeHash.fold (fun _k v acc -> v::acc) g_table []
   end
 
-
-
-  let rec assign_last_value_of_statement id sl = (* for extracting C_InlineRevStatements *)
-    let f e = C_Assign (C_Variable id, e) in
-    match sl with
-    | [] -> failwith "assign_last_value_of_statement: empty sl" (* TODO: unit? *)
-    | s::sl ->
-        begin
-          match s with
-          | C_Expression e -> f e :: sl
-          | C_VarDeclare _ -> failwith "assign_last_value_of_statement: unexpected C_VarDeclare as last statement in sl"
-          | C_Assign (varid,e) -> f varid :: C_Assign (varid,e) :: sl
-          | C_If (e,slt, slf) -> C_If (e, assign_last_value_of_statement id slt, assign_last_value_of_statement id slf) :: sl
-          | C_Return _ -> failwith "assign_last_value_of_statement: unexpected C_Return as last statement in sl"
-        end
-
-
-  let map_intersperse_concat f sep xs =
-    let rec loop accum = function
-      | [] -> accum
-      | x::xs -> loop (accum ^ sep ^ (f x)) xs
-    in
-    match xs with
-    | [] -> ""
-    | x::xs -> loop (f x) xs
 
   let rec ctype_to_string = function
     | C_CommentedType (cty, comment) -> Printf.sprintf "%s/*%s*/" (ctype_to_string cty) comment
@@ -339,7 +322,7 @@ let compile_implementation modulename lambda =
         C_VarDeclare (C_Boxed, id, Some (lambda_to_expression env lam))
 
 
-  (* Translates a structured constant into an expression of ctype ocaml_value_t* *)
+  (* Translates a structured constant into an expression *)
   and structured_constant_to_expression env = function
     | Const_base (Const_int n) -> C_IntLiteral n
     | Const_base (Const_char ch) -> C_CharLiteral ch
@@ -425,7 +408,7 @@ let compile_implementation modulename lambda =
                    List.map (lambda_to_expression env) ap_args)
     | Lifthenelse _ ->
         C_InlineRevStatements (lambda_to_rev_statements env lam)
-    | _ -> failwith ("lambda_to_expression " ^ (dumps_lambda lam))
+    | _ -> failwith ("lambda_to_expression " ^ (formats Printlambda.lambda lam))
 
   and lambda_to_rev_statements env lam =
     match lam with
@@ -445,7 +428,7 @@ let compile_implementation modulename lambda =
         [C_If (lambda_to_expression env l,
                lambda_to_rev_statements env lt,
                lambda_to_rev_statements env lf)]
-    | lam -> failwith ("lambda_to_rev_statements " ^ (dumps_lambda lam))
+    | lam -> failwith ("lambda_to_rev_statements " ^ (formats Printlambda.lambda lam))
   in
 
   let static_constructors = ref [] in
@@ -498,11 +481,28 @@ let compile_implementation modulename lambda =
         let export_var = C_GlobalVariable module_id in
         static_constructors := C_Assign (export_var, es) :: !static_constructors;
         [C_GlobalDefn (C_Pointer C_Boxed, export_var, None) (* .bss NULL *)]
-    | _ -> failwith ("lambda_to_toplevels " ^ (dumps_lambda lam))
+    | _ -> failwith ("lambda_to_toplevels " ^ (formats Printlambda.lambda lam))
   in
 
 
   let deinlined_funs = ref [] in (* TODO: one day we want them to be attached near their users *)
+
+  (* for extracting C_InlineRevStatements. assigns the final expression to the
+   * variable [id] *)
+  let rec assign_last_value_of_statement id sl =
+    let f e = C_Assign (C_Variable id, e) in
+    match sl with
+    | [] -> failwith "assign_last_value_of_statement: empty sl" (* TODO: unit? *)
+    | s::sl ->
+        begin
+          match s with
+          | C_Expression e -> f e :: sl
+          | C_VarDeclare _ -> failwith "assign_last_value_of_statement: unexpected C_VarDeclare as last statement in sl"
+          | C_Assign (varid,e) -> f varid :: C_Assign (varid,e) :: sl
+          | C_If (e,slt, slf) -> C_If (e, assign_last_value_of_statement id slt, assign_last_value_of_statement id slf) :: sl
+          | C_Return _ -> failwith "assign_last_value_of_statement: unexpected C_Return as last statement in sl"
+        end
+  in
 
   let rec fixup_expression accum e = (* sticks inlined statements on the front of accum *)
     match e with
@@ -572,7 +572,7 @@ let compile_implementation modulename lambda =
     match lambda with
     | Lprim (Psetglobal id, [lam]) when Ident.name id = modulename ->
         lambda_to_toplevels id Env.empty lam
-    | lam -> failwith ("compile_implementation unexpected root: " ^ (dumps_lambda lam))
+    | lam -> failwith ("compile_implementation unexpected root: " ^ (formats Printlambda.lambda lam))
   in
   let fixed_toplevels =
     List.map (map_toplevel (fixup_rev_statements [])) toplevels
@@ -595,10 +595,12 @@ let compile_implementation modulename lambda =
         ]
       ) !globals)
   in
+
   (* NB: should be evaluated last when we know all types *)
   let global_typedecls =
     List.map (fun ty -> C_TypeDefn ty) (TypeLibrary.dump_all_types_for_definition ())
   in
+
   [C_TopLevelComment "global typedecls:"] @ global_typedecls @
   [C_TopLevelComment "global decls:"] @ global_decls @
   [C_TopLevelComment "deinlined functions:"] @ !deinlined_funs @
