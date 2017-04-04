@@ -86,67 +86,83 @@ module C = struct
     | C_FunDefn _ -> t
 
 
-  (* the type library is responsible for translating type_exprs to C types,
-   * and keeping track of all newly created C types (structs), and the mapping
-   * from type_exprs to these types *)
-  module TypeLibrary = struct
-    (* the payload of data we want with each type_expr *)
-    type t = ctype
+  let rec ctype_size_nwords = function
+    | C_CommentedType (cty, _) -> ctype_size_nwords cty
+    | C_Pointer _ | C_FunPointer _ | C_Boxed | C_Int | C_Double | C_UInt -> 1
+    | C_Struct (_, tys) -> List.fold_left (fun acc (t,_) -> acc + (ctype_size_nwords t)) 0 tys
+    | C_Bool | C_Char -> failwith "bools/chars have sub-word size"
+    | C_VarArgs | C_Void -> failwith "invalid ctype to query size for"
 
-    module TypeHash = Hashtbl.Make(Types.TypeOps)
-    (* TODO: store separate list in dependency order *)
-    let g_table: t TypeHash.t = TypeHash.create 16
+end
 
-    let rec tfield_to_list type_expr =
-      match type_expr.desc with
-      | Tfield (name, Fpresent, t, ts) -> (name, t) :: (tfield_to_list ts)
-      | Tnil -> []
-      | _ -> failwith "unexpected type_desc type in Tobject field list"
-
-    let rec add_structlike_mapping type_expr name_hint ts =
-      let struct_name = Ident.create name_hint in
-      let ctype =
-        C_Struct (struct_name, (List.map (fun (fieldname, fieldtype) ->
-          ocaml_to_c_type fieldtype, Ident.create fieldname) ts))
-      in
-      TypeHash.add g_table type_expr ctype;
-      ctype
-
-    and add_mapping type_expr =
-      match type_expr.desc with
-      | Ttuple ts ->
-          add_structlike_mapping type_expr "tuple" (List.mapi (fun i t -> (Printf.sprintf "_%d" (i+1)), t) ts)
-      | Tobject (ts, r) when !r = None ->
-          add_structlike_mapping type_expr "struct" (tfield_to_list ts)
-      | _ -> failwith "unexpected type_expr to add mapping for"
-
-    and ocaml_to_c_type type_expr =
-      match type_expr.desc with
-      | Tvar _ -> C_Boxed
-      | Tarrow _ -> C_FunPointer (C_Void, []) (* TODO: could add more detail *)
-      | Tconstr (path, [], _) when path = Predef.path_int -> C_Int
-      | Tconstr (path, [], _) when path = Predef.path_string -> C_Pointer C_Char
-      | Tconstr (path, [], _) when path = Predef.path_float -> C_Double
-      (* TODO: add more *)
-      | Tconstr _ -> C_CommentedType (C_Boxed, "unknown Tconstr")
-      | Ttuple _
-      | Tobject _ ->
-          (try TypeHash.find g_table type_expr
-           with Not_found -> add_mapping type_expr)
-      | Tfield _ | Tnil -> failwith "unexpected Tfield/Tnil at top level"
-      | Tlink _e
-      | Tsubst _e -> failwith "unexpected Tlink/Tsubst" (* ocaml_to_c_type e probably? *)
-      | Tvariant _ -> failwith "really need to handle Tvariant" (* TODO *)
-      | Tunivar _ | Tpoly _ | Tpackage _ -> failwith "type which i have no idea"
+open C
 
 
-    (* get all struct declarations so far *)
-    (* TODO: read from separate list in dependency order *)
-    let dump_all_types_for_definition () =
-      TypeHash.fold (fun _k v acc -> v::acc) g_table []
-  end
+(* the type library is responsible for translating type_exprs to C types,
+ * and keeping track of all newly created C types (structs), and the mapping
+ * from type_exprs to these types *)
+module TypeLibrary = struct
+  (* the payload of data we want with each type_expr *)
+  type t = ctype
+
+  module TypeHash = Hashtbl.Make(Types.TypeOps)
+  (* TODO: store separate list in dependency order *)
+  let g_table: t TypeHash.t = TypeHash.create 16
+
+  let rec tfield_to_list type_expr =
+    match type_expr.desc with
+    | Tfield (name, Fpresent, t, ts) -> (name, t) :: (tfield_to_list ts)
+    | Tnil -> []
+    | _ -> failwith "unexpected type_desc type in Tobject field list"
+
+  let rec add_structlike_mapping type_expr name_hint ts =
+    let struct_name = Ident.create name_hint in
+    let ctype =
+      C_Struct (struct_name, (List.map (fun (fieldname, fieldtype) ->
+        ocaml_to_c_type fieldtype, Ident.create fieldname) ts))
+    in
+    TypeHash.add g_table type_expr ctype;
+    ctype
+
+  and add_mapping type_expr =
+    match type_expr.desc with
+    | Ttuple ts ->
+        add_structlike_mapping type_expr "tuple" (List.mapi (fun i t -> (Printf.sprintf "_%d" (i+1)), t) ts)
+    | Tobject (ts, r) when !r = None ->
+        add_structlike_mapping type_expr "struct" (tfield_to_list ts)
+    | _ -> failwith "unexpected type_expr to add mapping for"
+
+  and ocaml_to_c_type type_expr =
+    match type_expr.desc with
+    | Tvar _ -> C_Boxed
+    | Tarrow _ -> C_FunPointer (C_Void, []) (* TODO: could add more detail *)
+    | Tconstr (path, [], _) when path = Predef.path_int -> C_Int
+    | Tconstr (path, [], _) when path = Predef.path_string -> C_Pointer C_Char
+    | Tconstr (path, [], _) when path = Predef.path_float -> C_Double
+    (* TODO: add more *)
+    | Tconstr _ -> C_CommentedType (C_Boxed, "unknown Tconstr")
+    | Ttuple _
+    | Tobject _ ->
+        (try TypeHash.find g_table type_expr
+         with Not_found -> add_mapping type_expr)
+    | Tfield _ | Tnil -> failwith "unexpected Tfield/Tnil at top level"
+    | Tlink _e
+    | Tsubst _e -> failwith "unexpected Tlink/Tsubst" (* ocaml_to_c_type e probably? *)
+    | Tvariant _ -> failwith "really need to handle Tvariant" (* TODO *)
+    | Tunivar _ | Tpoly _ | Tpackage _ -> failwith "type which i have no idea"
 
 
+  (* get all struct declarations so far *)
+  (* TODO: read from separate list in dependency order *)
+  let dump_all_types_for_definition () =
+    TypeHash.fold (fun _k v acc -> v::acc) g_table []
+end
+
+
+
+
+
+module Emitcode = struct
   let rec ctype_to_string = function
     | C_CommentedType (cty, comment) -> Printf.sprintf "%s/*%s*/" (ctype_to_string cty) comment
     | C_Pointer cty -> (ctype_to_string cty) ^ "*"
@@ -160,13 +176,6 @@ module C = struct
     | C_Struct (id, _) -> "struct " ^ (Ident.unique_name id)
     | C_FunPointer (tyret, tyargs) -> Printf.sprintf "%s(*)(%s)" (ctype_to_string tyret) (map_intersperse_concat ctype_to_string "," tyargs)
     | C_VarArgs -> "..."
-
-  let rec ctype_size_nwords = function
-    | C_CommentedType (cty, _) -> ctype_size_nwords cty
-    | C_Pointer _ | C_FunPointer _ | C_Boxed | C_Int | C_Double | C_UInt -> 1
-    | C_Struct (_, tys) -> List.fold_left (fun acc (t,_) -> acc + (ctype_size_nwords t)) 0 tys
-    | C_Bool | C_Char -> failwith "bools/chars have sub-word size"
-    | C_VarArgs | C_Void -> failwith "invalid ctype to query size for"
 
   let cstruct_defn_string id fields =
     let fieldstrings =
@@ -256,20 +265,20 @@ module C = struct
           | None -> ";"
           | Some xs -> "{\n" ^ (rev_statements_to_string xs) ^ "\n}"
         )
-end
 
-module Emitcode = struct
+
   let to_file oc _modulename _filename c_code =
     output_string oc "#include <stdlib.h>\n#include <stdint.h>\n";
     output_string oc "#include \"liballocs.h\"\n";
     output_string oc "\n";
     List.iter (fun t ->
-        output_string oc (C.toplevel_to_string t);
+        output_string oc (toplevel_to_string t);
         output_string oc "\n\n";
       ) c_code
 end
 
-open C
+
+
 
 let compile_implementation modulename lambda =
   let do_allocation nwords (type_expr_result : _ result) =
@@ -304,7 +313,7 @@ let compile_implementation modulename lambda =
     | Levent (body, ev) ->
         let_args_to_vardecl (Envaux.env_from_summary ev.lev_env Subst.identity) id body
     | Lfunction { params ; body } ->
-        Printf.printf "Got a expression fun LET %s\n%!" (expression_to_string id);
+        Printf.printf "Got a expression fun LET %s\n%!" (Emitcode.expression_to_string id);
         let typedparams = List.map (fun id ->
             (*ENV
               Printf.printf "We have these in env: %s\n%!" (dumps_env env);
@@ -438,7 +447,7 @@ let compile_implementation modulename lambda =
     | Levent (body, ev) ->
         let_args_to_toplevels (Envaux.env_from_summary ev.lev_env Subst.identity) id body
     | Lfunction { params ; body } ->
-        Printf.printf "Got a fun LET %s\n%!" (expression_to_string id);
+        Printf.printf "Got a fun LET %s\n%!" (Emitcode.expression_to_string id);
         let typedparams = List.map (fun id ->
             (*ENV
               Printf.printf "We have these in env: %s\n%!" (dumps_env env);
