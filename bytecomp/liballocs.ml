@@ -25,7 +25,7 @@ module C = struct
   type ctype =
     | C_CommentedType of ctype * string
     | C_Pointer of ctype
-    | C_Boxed (* the union boxed_pointer_t *)
+    | C_Boxed (* the union ocaml_value_t *)
     | C_Void
     | C_Int
     | C_Double
@@ -167,7 +167,7 @@ module C = struct
   let rec ctype_to_string = function
     | C_CommentedType (cty, comment) -> Printf.sprintf "%s/*%s*/" (ctype_to_string cty) comment
     | C_Pointer cty -> (ctype_to_string cty) ^ "*"
-    | C_Boxed -> "boxed_pointer_t"
+    | C_Boxed -> "ocaml_value_t"
     | C_Void -> "void"
     | C_Int -> "intptr_t"
     | C_Double -> "double"
@@ -339,7 +339,7 @@ let compile_implementation modulename lambda =
         C_VarDeclare (C_Boxed, id, Some (lambda_to_expression env lam))
 
 
-  (* Translates a structured constant into an expression of ctype boxed_pointer_t* *)
+  (* Translates a structured constant into an expression of ctype ocaml_value_t* *)
   and structured_constant_to_expression env = function
     | Const_base (Const_int n) -> C_IntLiteral n
     | Const_base (Const_char ch) -> C_CharLiteral ch
