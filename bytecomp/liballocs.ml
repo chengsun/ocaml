@@ -40,9 +40,13 @@ module C = struct
     | C_UInt
     | C_Bool
     | C_Char
-    | C_Struct of Ident.t * (ctype * Ident.t) list
+    | C_Struct of Ident.t * (ctype * string) list
     | C_FunPointer of ctype * ctype list
     | C_VarArgs
+
+  let rec canon_ctype = function
+    | C_CommentedType (t,_) -> canon_ctype t
+    | t -> t
 
   type expression =
     | C_Blob of (string * expression * string)
@@ -53,9 +57,10 @@ module C = struct
     | C_StringLiteral of string
     | C_CharLiteral of char
     | C_GlobalVariable of Ident.t
-    | C_Variable of Ident.t
-    | C_ArrayIndex of expression * int option
-    | C_InitialiserList of expression list
+    | C_Variable of Ident.t (* y *)
+    | C_ArrayIndex of expression * int option (* <...>[] or <...>[0] *)
+    | C_Field of expression * string (* <...>.foo *)
+    | C_InitialiserList of expression list (* { <...>, <...> } *)
     | C_Cast of ctype * expression
     | C_BinaryOp of string * expression * expression
     | C_FunCall of expression * expression list
@@ -67,6 +72,8 @@ module C = struct
     | C_Assign of expression * expression
     | C_If of expression * statement list * statement list (* reversed! *)
     | C_Return of expression option
+
+  and texpression = ctype * expression
 
   type toplevel =
     | C_TopLevelComment of string
@@ -85,7 +92,6 @@ module C = struct
     | C_FunDefn (ct,e,args,Some sl) -> C_FunDefn (ct,e,args,Some (f sl))
     | C_FunDefn _ -> t
 
-
   let rec ctype_size_nwords = function
     | C_CommentedType (cty, _) -> ctype_size_nwords cty
     | C_Pointer _ | C_FunPointer _ | C_Boxed | C_Int | C_Double | C_UInt -> 1
@@ -93,6 +99,32 @@ module C = struct
     | C_Bool | C_Char -> failwith "bools/chars have sub-word size"
     | C_VarArgs | C_Void -> failwith "invalid ctype to query size for"
 
+
+  let cast target_ctype (source_ctype, source_cexpr) =
+    let box_kind = function
+      | C_Int | C_UInt | C_Bool | C_Char -> "i"
+      | C_Double -> "d"
+      | C_Pointer _ -> "p"
+      | C_FunPointer _ -> "fp"
+      | _ -> failwith "invalid box kind"
+    in
+    let st = canon_ctype source_ctype in
+    let tt = canon_ctype target_ctype in
+    if st = C_Boxed && tt = C_Boxed then (
+      source_cexpr
+    ) else if st <> C_Boxed && tt <> C_Boxed then (
+      (* we need to cast *)
+      assert (box_kind st = box_kind tt); (* make sure the cast is sensible *)
+      C_Cast (tt, source_cexpr)
+    ) else if st = C_Boxed then (
+      (* we need to unbox according to target_ctype *)
+      C_Cast (tt, C_Field (source_cexpr, box_kind tt))
+    ) else if tt = C_Boxed then (
+      (* we need to box according to source_ctype *)
+      C_Cast (tt,
+        (* TODO: rewrite -- this is disgusting *)
+        C_Blob (Printf.sprintf "{ .%s = " (box_kind st), source_cexpr, " }"))
+    ) else failwith "unreachable"
 end
 
 open C
@@ -119,7 +151,7 @@ module TypeLibrary = struct
     let struct_name = Ident.create name_hint in
     let ctype =
       C_Struct (struct_name, (List.map (fun (fieldname, fieldtype) ->
-        ocaml_to_c_type fieldtype, Ident.create fieldname) ts))
+        ocaml_to_c_type fieldtype, fieldname) ts))
     in
     TypeHash.add g_table type_expr ctype;
     ctype
@@ -181,8 +213,8 @@ module Emitcode = struct
 
   let cstruct_defn_string id fields =
     let fieldstrings =
-      map_intersperse_concat (fun (ctype, fieldid) ->
-        Printf.sprintf "%s %s;" (ctype_to_string ctype) (Ident.unique_name fieldid)
+      map_intersperse_concat (fun (ctype, fieldname) ->
+        Printf.sprintf "%s %s;" (ctype_to_string ctype) fieldname
       ) "\n" fields
     in
     Printf.sprintf "struct %s {\n%s\n};\n" (Ident.unique_name id) fieldstrings
@@ -215,6 +247,7 @@ module Emitcode = struct
     | C_CharLiteral ch -> Printf.sprintf "%C" ch
     | C_GlobalVariable id -> Ident.name id
     | C_Variable id -> Ident.unique_name id
+    | C_Field (e,f) -> Printf.sprintf "%s.%s" (expression_to_string e) f
     | C_ArrayIndex (e,Some i) -> Printf.sprintf "%s[%d]" (expression_to_string e) i
     | C_ArrayIndex (e,None) -> (expression_to_string e) ^ "[]"
     | C_InitialiserList es -> Printf.sprintf "{%s}" (map_intersperse_concat expression_to_string ", " es)
@@ -281,7 +314,6 @@ end
 
 
 
-
 let compile_implementation modulename lambda =
   let do_allocation nwords (type_expr_result : _ result) =
     let ctype, n =
@@ -295,16 +327,6 @@ let compile_implementation modulename lambda =
     in
     C_Allocate(ctype, n, type_expr_result)
   in
-
-  let make_boxed_d e =
-      C_Cast (C_Boxed,
-        (C_InitialiserList [ (* TODO: rewrite -- this is disgusting *)
-          C_Blob (".d = ", e, "")
-         ]))
-  in
-  (* TODO: rewrite -- this is disgusting *)
-  let get_boxed_d e = C_Blob ("", e, ".d") in
-  let get_boxed_f e = C_Blob ("", e, ".f") in
 
   let module_initialiser_name module_id = Ident.create ((Ident.name module_id) ^ "__init") in
 
@@ -325,65 +347,83 @@ let compile_implementation modulename lambda =
             *)
             C_Boxed, id
           ) params in
+        (* TODO: use _ret_type to determine ret type of function*)
+        let _ret_type, rev_st = lambda_to_trev_statements env body in
         let cbody =
-          C_Return (Some (C_InlineRevStatements (lambda_to_rev_statements env body)))
+          C_Return (Some (C_InlineRevStatements rev_st))
         in
         C_Expression (C_InlineFunDefn (id, typedparams, [cbody]))
     | _ ->
-        C_VarDeclare (C_Boxed, id, Some (lambda_to_expression env lam))
+        let ctype, defn = lambda_to_texpression env lam in
+        C_VarDeclare (ctype, id, Some (defn))
 
 
   (* Translates a structured constant into an expression and its ctype *)
   and structured_constant_to_texpression env = function
-    | Const_base (Const_int n) -> C_IntLiteral n, C_Int
-    | Const_base (Const_char ch) -> C_Cast (C_Int, C_CharLiteral ch), C_Int (*not C_Char because needs to be word-sized *)
-    | Const_base (Const_string (s, None)) -> C_StringLiteral s, C_Pointer C_Char (* FIXME: MUTABLE STRING, SHOULD NOT BE SHARED/just a literal *)
-    | Const_pointer n -> C_PointerLiteral n, C_Pointer C_Void
-    | Const_immstring str -> C_StringLiteral str, C_Pointer C_Char (* immediate/immutable string *)
+    | Const_base (Const_int n) -> C_Int, C_IntLiteral n
+    | Const_base (Const_char ch) -> C_Int, C_Cast (C_Int, C_CharLiteral ch)(*not C_Char because needs to be word-sized *)
+    | Const_base (Const_string (s, None)) -> C_Pointer C_Char, C_StringLiteral s(* FIXME: MUTABLE STRING, SHOULD NOT BE SHARED/just a literal *)
+    | Const_pointer n -> C_Pointer C_Void, C_PointerLiteral n
+    | Const_immstring str -> C_Pointer C_Char, C_StringLiteral str (* immediate/immutable string *)
     | Const_block (tag, scl) ->
-      lambda_to_expression env (Lprim
+      lambda_to_texpression env (Lprim
         (Pmakeblock (tag, Asttypes.Immutable, Error "structured_constant_to_texpression"),
-        List.map (fun x -> Lconst x) scl)), C_Boxed
+        List.map (fun x -> Lconst x) scl))
       (* we'll recurse back into this function eventually *)
     | _ -> failwith "structured_constant_to_texpression: unknown constant type"
 
-  and lambda_to_expression env lam : C.expression =
+  and lambda_to_texpression env lam : C.texpression =
     match lam with
     | Levent (body, ev) ->
-        lambda_to_expression (Envaux.env_from_summary ev.lev_env Subst.identity) body
+        lambda_to_texpression (Envaux.env_from_summary ev.lev_env Subst.identity) body
     | Lprim (prim, largs) ->
         begin
-          let bop op e1 e2 = C_BinaryOp (op, lambda_to_expression env e1, lambda_to_expression env e2) in
-          let int_bop op e1 e2 = C_BinaryOp (op,
-                                             C_Cast (C_Int, lambda_to_expression env e1),
-                                             C_Cast (C_Int, lambda_to_expression env e2)) in
+          let bop expected_type op e1 e2 =
+            expected_type,
+            C_BinaryOp (op,
+                        cast expected_type (lambda_to_texpression env e1),
+                        cast expected_type (lambda_to_texpression env e2))
+          in
+          let bool_bop = bop C_Bool in
+          let int_bop = bop C_Int in
           match prim, largs with
           | Popaque, [Lprim (Pgetglobal id, [])] ->
               (* assume these are declarations of use of external modules; ensure initialisation *)
               globals := id :: !globals;
+              C_Pointer C_Boxed, (* all modules are represented as arrays of ocaml_value_t *)
               C_InlineRevStatements (
                 [ C_Expression (C_GlobalVariable id)
                 ; C_Expression (C_FunCall (C_GlobalVariable (module_initialiser_name id), []))])
-          | Popaque, [lam] -> C_InlineRevStatements (lambda_to_rev_statements env lam)
-          | Pgetglobal id, [] -> C_GlobalVariable id
-          | Pfield i, [lam] -> C_ArrayIndex (lambda_to_expression env lam, Some i)
+          | Popaque, [lam] ->
+              (* TODO: can't this be handled recursively? *)
+              let ctype, rev_st = lambda_to_trev_statements env lam in
+              ctype, C_InlineRevStatements rev_st
+          | Pgetglobal id, [] ->
+              (* TODO: make globals typed *)
+              C_Boxed, C_GlobalVariable id
+          | Pfield i, [lam] ->
+              (* TODO: make this use type-specific accessors if possible *)
+              C_Boxed,
+              C_ArrayIndex (cast (C_Pointer C_Boxed) (lambda_to_texpression env lam), Some i)
           | Pmakeblock (tag, mut, tyinfo), contents ->
               let id = Ident.create "__makeblock" in
               let var = C_Variable id in
               let rec construct k statements = function
                 | [] -> (C_Expression var) :: statements
                 | e_head::el ->
-                    let s = lambda_to_expression env e_head in
+                    (* TODO: sanity check type of this element *)
+                    let s = snd (lambda_to_texpression env e_head) in
                     let elem = C_ArrayIndex (var, Some k) in
                     let assign = C_Assign (elem,s) in
                     construct (succ k) (assign::statements) el
               in
+              C_Pointer C_Boxed,
               C_InlineRevStatements (construct 0 [
                   C_VarDeclare (C_Pointer C_Boxed, C_Variable id,
                                 Some (do_allocation (List.length contents) tyinfo))
                 ] contents)
-          | Psequand, [e1;e2] -> bop "&&" e1 e2
-          | Psequor, [e1;e2] -> bop "||" e1 e2
+          | Psequand, [e1;e2] -> bool_bop "&&" e1 e2
+          | Psequor, [e1;e2] -> bool_bop "||" e1 e2
           | Paddint, [e1;e2] -> int_bop "+" e1 e2
           | Psubint, [e1;e2] -> int_bop "-" e1 e2
           | Pmulint, [e1;e2] -> int_bop "*" e1 e2
@@ -401,8 +441,8 @@ let compile_implementation modulename lambda =
           | Pintcomp(Cge), [e1;e2] -> int_bop ">=" e1 e2
           | _ -> failwith ("lambda_to_expression Lprim " ^ (Printlambda.name_of_primitive prim))
         end
-    | Lconst sc -> fst (structured_constant_to_texpression env sc)
-    | Lvar id -> C_Variable id
+    | Lconst sc -> structured_constant_to_texpression env sc
+    | Lvar id -> C_Boxed, C_Variable id
     | Lapply { ap_func = e_id ; ap_args } ->
         (* FIXME: hardcoded for printf *)
         let vararg =
@@ -415,31 +455,39 @@ let compile_implementation modulename lambda =
           then C_FunPointer (C_Boxed, [C_Boxed; C_VarArgs])
           else C_FunPointer (C_Boxed, List.map (fun _ -> C_Boxed) ap_args)
         in
-        C_FunCall (C_Cast (ty, get_boxed_f (lambda_to_expression env e_id)),
-                   List.map (lambda_to_expression env) ap_args)
+        C_Boxed,
+        C_FunCall (cast ty (lambda_to_texpression env e_id),
+                   List.map (fun x -> snd (lambda_to_texpression env x)) (* TODO: sanity check types *)
+                            ap_args)
     | Lifthenelse _ ->
-        C_InlineRevStatements (lambda_to_rev_statements env lam)
+        let ctype, rev_st = lambda_to_trev_statements env lam in
+        ctype, C_InlineRevStatements rev_st
     | _ -> failwith ("lambda_to_expression " ^ (formats Printlambda.lambda lam))
 
-  and lambda_to_rev_statements env lam =
+  and lambda_to_trev_statements env lam =
     match lam with
     | Levent (body, ev) ->
-        lambda_to_rev_statements (Envaux.env_from_summary ev.lev_env Subst.identity) body
+        lambda_to_trev_statements (Envaux.env_from_summary ev.lev_env Subst.identity) body
     | Lvar _ | Lconst _ | Lprim _ | Lapply _ ->
-        [C_Expression (lambda_to_expression env lam)]
+        let ctype, cexpr = lambda_to_texpression env lam in
+        ctype, [C_Expression cexpr]
     | Llet (_strict, id, args, body) ->
-        (lambda_to_rev_statements env body) @
-        [let_args_to_vardecl env (C_Variable id) args]
+        let ctype, rev_st = lambda_to_trev_statements env body in
+        ctype, rev_st @ [let_args_to_vardecl env (C_Variable id) args]
     | Lletrec ([id, args], body) ->
-        (lambda_to_rev_statements env body) @
-        [let_args_to_vardecl env (C_Variable id) args]
+        let ctype, rev_st = lambda_to_trev_statements env body in
+        ctype, rev_st @ [let_args_to_vardecl env (C_Variable id) args]
     | Lsequence (l1, l2) ->
-        (lambda_to_rev_statements env l2) @ (lambda_to_rev_statements env l1)
+        let _ctype1, rev_st1 = lambda_to_trev_statements env l1 in
+        let ctype2, rev_st2 = lambda_to_trev_statements env l2 in
+        ctype2, rev_st2 @ rev_st1
     | Lifthenelse (l,lt,lf) ->
-        [C_If (lambda_to_expression env l,
-               lambda_to_rev_statements env lt,
-               lambda_to_rev_statements env lf)]
-    | lam -> failwith ("lambda_to_rev_statements " ^ (formats Printlambda.lambda lam))
+        let cexpr_cond = cast C_Bool (lambda_to_texpression env l) in
+        let ctype_t, rev_st_t = lambda_to_trev_statements env lt in
+        let ctype_f, rev_st_f = lambda_to_trev_statements env lf in
+        assert (ctype_t = ctype_f);
+        ctype_t, [C_If (cexpr_cond, rev_st_t, rev_st_f)]
+    | lam -> failwith ("lambda_to_trev_statements " ^ (formats Printlambda.lambda lam))
   in
 
   let static_constructors = ref [] in
@@ -460,12 +508,12 @@ let compile_implementation modulename lambda =
             C_Boxed, id
           ) params in
         let cbody =
-          C_Return (Some (C_InlineRevStatements (lambda_to_rev_statements env body)))
+          C_Return (Some (C_InlineRevStatements (snd (lambda_to_trev_statements env body))))
         in
         [C_FunDefn (C_Boxed, id, typedparams, Some [cbody])]
     | _ ->
         let cbody =
-          C_Assign (id, C_InlineRevStatements (lambda_to_rev_statements env lam))
+          C_Assign (id, C_InlineRevStatements (snd (lambda_to_trev_statements env lam)))
         in
         static_constructors := cbody :: !static_constructors;
         [ C_GlobalDefn (C_Boxed, id, None) ]
@@ -482,16 +530,16 @@ let compile_implementation modulename lambda =
         Printf.printf "Got a LETREC %s\n%!" (Ident.unique_name id);
         (let_args_to_toplevels env (C_Variable id) args) @ (lambda_to_toplevels module_id env body)
     | Lsequence (l1, l2) -> (* TODO: dedup this... *)
-        let cbody_rev = lambda_to_rev_statements env l1 in
+        let cbody_rev = snd (lambda_to_trev_statements env l1) in
         static_constructors := cbody_rev @ !static_constructors;
         lambda_to_toplevels module_id env l2
     | Lprim (Pmakeblock(tag, Immutable, tyinfo), largs) ->
-        (* TODO: why do we not use tyinfo here? *)
-        (* immutable makeblock at the toplevel: add module export table init code *)
-        let es = lambda_to_expression env lam in
+        (* This should be THE immutable makeblock at the toplevel. *)
+        let ctype, es = lambda_to_texpression env lam in
+        assert (ctype = C_Pointer C_Boxed);
         let export_var = C_GlobalVariable module_id in
         static_constructors := C_Assign (export_var, es) :: !static_constructors;
-        [C_GlobalDefn (C_Pointer C_Boxed, export_var, None) (* .bss NULL *)]
+        [C_GlobalDefn (C_Pointer C_Boxed, export_var, None) (* .bss initialised to NULL *)]
     | _ -> failwith ("lambda_to_toplevels " ^ (formats Printlambda.lambda lam))
   in
 
@@ -533,6 +581,7 @@ let compile_implementation modulename lambda =
     | C_IntLiteral _ | C_PointerLiteral _ | C_StringLiteral _ | C_CharLiteral _
     | C_Variable _ | C_GlobalVariable _ | C_Allocate _ -> accum, e
     | C_Blob (s1,e,s2) -> let (accum', e') = fixup_expression accum e in accum', C_Blob (s1,e',s2)
+    | C_Field (e,f) -> let (accum', e') = fixup_expression accum e in accum', C_Field (e',f)
     | C_ArrayIndex (e,i) -> let (accum', e') = fixup_expression accum e in accum', C_ArrayIndex (e',i)
     | C_Cast (ty,e) -> let (accum', e') = fixup_expression accum e in accum', C_Cast (ty,e')
     | C_BinaryOp (ty,e1,e2) ->
