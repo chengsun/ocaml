@@ -60,13 +60,16 @@ module C = struct
 
   type toplevel =
     | C_TopLevelComment of string
+    | C_TypeDefn of ctype (* e.g. defining a struct *)
     | C_GlobalDefn of ctype * expression * expression option
     | C_ExternDecl of ctype * expression
     | C_FunDefn of ctype * expression * (ctype * Ident.t) list * statement list option
 
+  (* runs [f] on any statement lists in the toplevel *)
   let rec map_toplevel f t =
     match t with
     | C_TopLevelComment _ -> t
+    | C_TypeDefn _ -> t
     | C_GlobalDefn _ -> t
     | C_ExternDecl _ -> t
     | C_FunDefn (ct,e,args,Some sl) -> C_FunDefn (ct,e,args,Some (f sl))
@@ -75,28 +78,32 @@ module C = struct
 
   module TypeLibrary = struct
     (* the payload of data we want with each type_expr *)
-    let t = ctype
+    type t = ctype
 
     module TypeHash = Hashtbl.Make(Types.TypeOps)
-    let table: (Types.type_expr, t) TypeHash.t = TypeHash.create 16
+    let table: t TypeHash.t = TypeHash.create 16
 
-    let rec tfield_to_list = function
+    let rec tfield_to_list type_expr =
+      match type_expr.desc with
       | Tfield (name, Fpresent, t, ts) -> (name, t) :: (tfield_to_list ts)
       | Tnil -> []
       | _ -> failwith "unexpected type_desc type in Tobject field list"
 
-    let add_structlike_mapping name_hint ts =
+    let rec add_structlike_mapping type_expr name_hint ts =
       let struct_name = Ident.create name_hint in
       let ctype =
         C_Struct (struct_name, (List.map (fun (fieldname, fieldtype) ->
           ocaml_to_c_type fieldtype, Ident.create fieldname) ts))
       in
-      table.add table type_expr ctype;
+      TypeHash.add table type_expr ctype;
       ctype
 
-    and add_mapping type_expr = function
-      | Ttuple ts -> add_structlike_mapping "tuple" (List.mapi (fun i t -> (Printf.sprintf "_%d" i+1), t) ts)
-      | Tobject (ts, None) -> add_structlike_mapping "struct" (tfield_to_list ts)
+    and add_mapping type_expr =
+      match type_expr.desc with
+      | Ttuple ts ->
+          add_structlike_mapping type_expr "tuple" (List.mapi (fun i t -> (Printf.sprintf "_%d" (i+1)), t) ts)
+      | Tobject (ts, r) when !r = None ->
+          add_structlike_mapping type_expr "struct" (tfield_to_list ts)
       | _ -> failwith "unexpected type_expr to add mapping for"
 
     and ocaml_to_c_type type_expr =
@@ -106,10 +113,8 @@ module C = struct
       | Tconstr _ -> C_Boxed (* TODO: who knows? *)
       | Ttuple _
       | Tobject _ ->
-          begin match table.find table type_expr with
-          | Some x -> x
-          | None -> add_mapping type_expr
-          end
+          (try TypeHash.find table type_expr
+           with Not_found -> add_mapping type_expr)
       | Tfield _ | Tnil -> failwith "unexpected Tfield/Tnil at top level"
       | Tlink _e
       | Tsubst _e -> failwith "unexpected Tlink/Tsubst" (* ocaml_to_c_type e probably? *)
@@ -118,12 +123,8 @@ module C = struct
 
 
     (* get all struct declarations so far *)
-    let dump_all_typedefns_str () =
-      TypeHash.fold (fun k v acc -> acc ^ "\n\n" ^ (dump_typedefn_str k v)) table ""
-
-    (* get a struct declaration for a type that needs it. *)
-    let rec typedecl_string type_expr =
-      a
+    let dump_all_types_for_definition () =
+      TypeHash.fold (fun _k v acc -> v::acc) table []
   end
 
 
@@ -164,7 +165,7 @@ module C = struct
     | C_FunPointer (tyret, tyargs) -> Printf.sprintf "%s(*)(%s)" (ctype_to_string tyret) (map_intersperse_concat ctype_to_string "," tyargs)
     | C_VarArgs -> "..."
 
-  let cstruct_defn_string id fields = fun
+  let cstruct_defn_string id fields =
     let fieldstrings =
       map_intersperse_concat (fun (ctype, fieldid) ->
         Printf.sprintf "%s %s;" (ctype_to_string ctype) (Ident.unique_name fieldid)
@@ -233,6 +234,7 @@ module C = struct
 
   let toplevel_to_string = function
     | C_TopLevelComment str -> "/*\n" ^ str ^ "\n*/"
+    | C_TypeDefn t -> ctype_defn_string t
     | C_GlobalDefn (t,id,e_option) ->
         (ctype_to_string t) ^ " " ^ (expression_to_string id) ^
         (match e_option with
@@ -557,6 +559,10 @@ let compile_implementation modulename lambda =
         ]
       ) !globals)
   in
+  let global_typedecls =
+    List.map (fun ty -> C_TypeDefn ty) (TypeLibrary.dump_all_types_for_definition ())
+  in
+  [C_TopLevelComment "global typedecls:"] @ global_typedecls @
   [C_TopLevelComment "global decls:"] @ global_decls @
   [C_TopLevelComment "deinlined functions:"] @ !deinlined_funs @
   [C_TopLevelComment "fixed toplevels:"] @ fixed_toplevels @
