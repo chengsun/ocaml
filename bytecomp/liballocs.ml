@@ -127,9 +127,11 @@ module TypeLibrary = struct
   and add_mapping type_expr =
     match type_expr.desc with
     | Ttuple ts ->
-        add_structlike_mapping type_expr "tuple" (List.mapi (fun i t -> (Printf.sprintf "_%d" (i+1)), t) ts)
+        add_structlike_mapping type_expr "tuple"
+          (List.mapi (fun i t -> (Printf.sprintf "_%d" (i+1)), t) ts)
     | Tobject (ts, r) when !r = None ->
-        add_structlike_mapping type_expr "struct" (tfield_to_list ts)
+        add_structlike_mapping type_expr "struct"
+          (tfield_to_list ts)
     | _ -> failwith "unexpected type_expr to add mapping for"
 
   and ocaml_to_c_type type_expr =
@@ -331,19 +333,19 @@ let compile_implementation modulename lambda =
         C_VarDeclare (C_Boxed, id, Some (lambda_to_expression env lam))
 
 
-  (* Translates a structured constant into an expression *)
-  and structured_constant_to_expression env = function
-    | Const_base (Const_int n) -> C_IntLiteral n
-    | Const_base (Const_char ch) -> C_CharLiteral ch
-    | Const_base (Const_string (s, None)) -> C_StringLiteral s (* FIXME: MUTABLE STRING, SHOULD NOT BE SHARED/just a literal *)
-    | Const_pointer n -> C_PointerLiteral n
-    | Const_immstring str -> C_StringLiteral str (* immediate/immutable string *)
+  (* Translates a structured constant into an expression and its ctype *)
+  and structured_constant_to_texpression env = function
+    | Const_base (Const_int n) -> C_IntLiteral n, C_Int
+    | Const_base (Const_char ch) -> C_Cast (C_Int, C_CharLiteral ch), C_Int (*not C_Char because needs to be word-sized *)
+    | Const_base (Const_string (s, None)) -> C_StringLiteral s, C_Pointer C_Char (* FIXME: MUTABLE STRING, SHOULD NOT BE SHARED/just a literal *)
+    | Const_pointer n -> C_PointerLiteral n, C_Pointer C_Void
+    | Const_immstring str -> C_StringLiteral str, C_Pointer C_Char (* immediate/immutable string *)
     | Const_block (tag, scl) ->
       lambda_to_expression env (Lprim
-        (Pmakeblock (tag, Asttypes.Immutable, Error "structured_constant_to_expression"),
-        List.map (fun x -> Lconst x) scl))
+        (Pmakeblock (tag, Asttypes.Immutable, Error "structured_constant_to_texpression"),
+        List.map (fun x -> Lconst x) scl)), C_Boxed
       (* we'll recurse back into this function eventually *)
-    | _ -> failwith "structured_constant_to_expression: unknown constant type"
+    | _ -> failwith "structured_constant_to_texpression: unknown constant type"
 
   and lambda_to_expression env lam : C.expression =
     match lam with
@@ -399,7 +401,7 @@ let compile_implementation modulename lambda =
           | Pintcomp(Cge), [e1;e2] -> int_bop ">=" e1 e2
           | _ -> failwith ("lambda_to_expression Lprim " ^ (Printlambda.name_of_primitive prim))
         end
-    | Lconst sc -> structured_constant_to_expression env sc
+    | Lconst sc -> fst (structured_constant_to_texpression env sc)
     | Lvar id -> C_Variable id
     | Lapply { ap_func = e_id ; ap_args } ->
         (* FIXME: hardcoded for printf *)
