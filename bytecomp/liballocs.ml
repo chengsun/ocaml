@@ -23,6 +23,7 @@ let dumps_env env =
 
 module C = struct
   type ctype =
+    | C_CommentedType of ctype * string
     | C_Pointer of ctype
     | C_Boxed (* the union boxed_pointer_t *)
     | C_Void
@@ -119,7 +120,7 @@ module C = struct
       | Tconstr (path, [], _) when path = Predef.path_string -> C_Pointer C_Char
       | Tconstr (path, [], _) when path = Predef.path_float -> C_Double
       (* TODO: add more *)
-      | Tconstr _ -> C_Boxed (* TODO: who knows? *)
+      | Tconstr _ -> C_CommentedType (C_Boxed, "unknown Tconstr")
       | Ttuple _
       | Tobject _ ->
           (try TypeHash.find g_table type_expr
@@ -164,6 +165,7 @@ module C = struct
     | x::xs -> loop (f x) xs
 
   let rec ctype_to_string = function
+    | C_CommentedType (cty, comment) -> Printf.sprintf "%s/*%s*/" (ctype_to_string cty) comment
     | C_Pointer cty -> (ctype_to_string cty) ^ "*"
     | C_Boxed -> "boxed_pointer_t"
     | C_Void -> "void"
@@ -177,6 +179,7 @@ module C = struct
     | C_VarArgs -> "..."
 
   let rec ctype_size_nwords = function
+    | C_CommentedType (cty, _) -> ctype_size_nwords cty
     | C_Pointer _ | C_FunPointer _ | C_Boxed | C_Int | C_Double | C_UInt -> 1
     | C_Struct (_, tys) -> List.fold_left (fun acc (t,_) -> acc + (ctype_size_nwords t)) 0 tys
     | C_Bool | C_Char -> failwith "bools/chars have sub-word size"
