@@ -72,7 +72,7 @@ module C = struct
     | C_PointerLiteral of int
     | C_StringLiteral of string
     | C_CharLiteral of char
-    | C_GlobalVariable of Ident.t
+    | C_GlobalVariable of string
     | C_Variable of Ident.t (* y *)
     | C_ArrayIndex of expression * int option (* <...>[] or <...>[0] *)
     | C_Field of expression * string (* <...>.foo *)
@@ -214,7 +214,7 @@ module Emitcode = struct
     | C_PointerLiteral i -> Printf.sprintf "((void*)%d)" i
     | C_StringLiteral str -> Printf.sprintf "%S" str
     | C_CharLiteral ch -> Printf.sprintf "%C" ch
-    | C_GlobalVariable id -> Ident.name id
+    | C_GlobalVariable id -> id
     | C_Variable id -> Ident.unique_name id
     | C_Field (e,f) -> Printf.sprintf "%s.%s" (expression_to_string e) f
     | C_ArrayIndex (e,Some i) -> Printf.sprintf "%s[%d]" (expression_to_string e) i
@@ -385,6 +385,7 @@ module VarLibrary = struct
 
   let reset () =
     VarHash.clear g_table;
+    (* prepopulate with some inbuilt modules *)
     List.iter (fun (ty, id) -> set_ctype ty id)
     [ C_Pointer C_Boxed, Ident.create_persistent "Pervasives"
     ; C_Pointer C_Boxed, Ident.create_persistent "Printf"
@@ -411,7 +412,7 @@ let compile_implementation modulename lambda =
     C_Allocate(ctype, n, type_expr_result)
   in
 
-  let module_initialiser_name module_id = Ident.create ((Ident.name module_id) ^ "__init") in
+  let module_initialiser_name module_id = (Ident.name module_id) ^ "__init" in
 
   let globals = ref [] in
 
@@ -488,14 +489,14 @@ let compile_implementation modulename lambda =
               globals := id :: !globals;
               C_Pointer C_Boxed, (* all modules are represented as arrays of ocaml_value_t *)
               C_InlineRevStatements (VarLibrary.ctype id,
-                [ C_Expression (C_GlobalVariable id)
+                [ C_Expression (C_GlobalVariable (Ident.name id))
                 ; C_Expression (C_FunCall (C_GlobalVariable (module_initialiser_name id), []))])
           | Popaque, [lam] ->
               (* TODO: can't this be handled recursively? *)
               let ctype, rev_st = lambda_to_trev_statements env lam in
               ctype, C_InlineRevStatements (ctype, rev_st)
           | Pgetglobal id, [] ->
-              VarLibrary.ctype id, C_GlobalVariable id
+              VarLibrary.ctype id, C_GlobalVariable (Ident.name id)
           | Pfield i, [lam] ->
               (* TODO: make this use type-specific accessors if possible *)
               C_Boxed,
@@ -534,6 +535,12 @@ let compile_implementation modulename lambda =
           | Pintcomp(Cle), [e1;e2] -> int_bop "<=" e1 e2
           | Pintcomp(Cgt), [e1;e2] -> int_bop ">" e1 e2
           | Pintcomp(Cge), [e1;e2] -> int_bop ">=" e1 e2
+          | Pccall {prim_name; prim_arity}, lam ->
+              assert (List.length lam = prim_arity);
+              let args =
+                List.map (fun x -> cast C_Boxed (lambda_to_texpression env x)) lam
+              in
+              C_Boxed, C_FunCall (C_GlobalVariable prim_name, args)
           | _ -> failwith ("lambda_to_expression Lprim " ^ (Printlambda.name_of_primitive prim))
         end
     | Lconst sc -> structured_constant_to_texpression env sc
@@ -672,7 +679,7 @@ let compile_implementation modulename lambda =
         (* This is THE immutable makeblock at the toplevel. *)
         let ctype, es = lambda_to_texpression env lam in
         assert (ctype = C_Pointer C_Boxed);
-        let export_var = C_GlobalVariable module_id in (* no need to add export var to VarLibrary *)
+        let export_var = C_GlobalVariable (Ident.name module_id) in (* no need to add export var to VarLibrary *)
         static_constructors := C_Assign (export_var, es) :: !static_constructors;
         [C_GlobalDefn (ctype, export_var, None) (* .bss initialised to NULL *)]
     | _ -> failwith ("lambda_to_toplevels " ^ (formats Printlambda.lambda lam))
@@ -758,7 +765,7 @@ let compile_implementation modulename lambda =
 
   let module_id = Ident.create modulename in
   let fixed_static_constructors =
-    C_If (C_GlobalVariable module_id,
+    C_If (C_GlobalVariable modulename,
           [C_Return None],
           fixup_rev_statements [] !static_constructors)
   in
@@ -769,7 +776,7 @@ let compile_implementation modulename lambda =
   let global_decls =
     List.concat (List.map (fun global_id ->
         [ C_FunDefn (C_Void, C_GlobalVariable (module_initialiser_name global_id), [], None)
-        ; C_ExternDecl (C_Pointer C_Boxed, C_GlobalVariable global_id)
+        ; C_ExternDecl (C_Pointer C_Boxed, C_GlobalVariable (Ident.name global_id))
         ]
       ) !globals)
   in

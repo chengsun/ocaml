@@ -24,4 +24,10 @@ STATIC_ASSERT(sizeof(generic_datap_t) == 8, sizeof_datap);
 STATIC_ASSERT(sizeof(generic_funcp_t) == 8, sizeof_funcp);
 STATIC_ASSERT(sizeof(ocaml_value_t) == 8, sizeof_ocaml_value);
 
+
+
+ocaml_value_t caml_set_oo_id (ocaml_value_t obj);
+ocaml_value_t caml_fresh_oo_id (ocaml_value_t v);
+
+
 #endif

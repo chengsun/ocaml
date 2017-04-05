@@ -6,6 +6,23 @@
 #include "liballocs.h"
 
 /*****************************************************************************
+  caml internal functions
+*****************************************************************************/
+
+static int64_t oo_last_id = 0;
+
+ocaml_value_t caml_set_oo_id (ocaml_value_t obj) {
+  obj.p[1].i = oo_last_id;
+  oo_last_id++;
+  return obj;
+}
+
+// used by [exception]
+ocaml_value_t caml_fresh_oo_id (ocaml_value_t v) {
+  return (ocaml_value_t){.i = oo_last_id++};
+}
+
+/*****************************************************************************
   Printf
 *****************************************************************************/
 
