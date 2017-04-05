@@ -386,7 +386,8 @@ module VarLibrary = struct
   let reset () =
     VarHash.clear g_table;
     List.iter (fun (ty, id) -> set_ctype ty id)
-    [ C_Pointer C_Boxed, Ident.create_persistent "Printf"
+    [ C_Pointer C_Boxed, Ident.create_persistent "Pervasives"
+    ; C_Pointer C_Boxed, Ident.create_persistent "Printf"
     ; C_Pointer C_Boxed, Ident.create_persistent "List"
     ]
 end
@@ -433,7 +434,11 @@ let compile_implementation modulename lambda =
           ) params in
         (* TODO: determine ret type of function*)
         let ret_type = C_Boxed in
+        let typedparams_types = List.map fst typedparams in
         let ret_var_id = VarLibrary.create ret_type "_return_value" in
+        (* be careful to assign the param types before lambda_to_trev_statements *)
+        List.iter2 (fun ctype id -> VarLibrary.set_ctype ctype id) typedparams_types params;
+        VarLibrary.set_ctype (C_FunPointer (ret_type, typedparams_types)) id;
         let rev_st =
           assign_last_value_of_statement (ret_type, ret_var_id) (lambda_to_trev_statements env body)
         in
@@ -442,7 +447,6 @@ let compile_implementation modulename lambda =
           rev_st @
           [C_VarDeclare (ret_type, C_Variable ret_var_id, None)]
         in
-        VarLibrary.set_ctype (C_FunPointer (ret_type, List.map fst typedparams)) id;
         [C_Expression (C_InlineFunDefn (ret_type, C_Variable id, typedparams, cbody))]
     | _ ->
         let ctype, defn = lambda_to_texpression env lam in
@@ -577,11 +581,15 @@ let compile_implementation modulename lambda =
         let ctype, cexpr = lambda_to_texpression env lam in
         ctype, [C_Expression cexpr]
     | Llet (_strict, id, args, body) ->
+        (* NB: order of execution of the next two lines matter! *)
+        let let_statements = let_to_rev_statements env id args in
         let ctype, rev_st = lambda_to_trev_statements env body in
-        ctype, rev_st @ (let_to_rev_statements env id args)
+        ctype, rev_st @ let_statements
     | Lletrec ([id, args], body) ->
+        (* NB: order of execution of the next two lines matter! *)
+        let let_statements = let_to_rev_statements env id args in
         let ctype, rev_st = lambda_to_trev_statements env body in
-        ctype, rev_st @ (let_to_rev_statements env id args)
+        ctype, rev_st @ let_statements
     | Lsequence (l1, l2) ->
         let _ctype1, rev_st1 = lambda_to_trev_statements env l1 in
         let ctype2, rev_st2 = lambda_to_trev_statements env l2 in
@@ -616,7 +624,11 @@ let compile_implementation modulename lambda =
           ) params in
         (* TODO: determine ret type of function*)
         let ret_type = C_Boxed in
+        let typedparams_types = List.map fst typedparams in
         let ret_var_id = VarLibrary.create ret_type "_return_value" in
+        (* be careful to assign the param types before lambda_to_trev_statements *)
+        List.iter2 (fun ctype id -> VarLibrary.set_ctype ctype id) typedparams_types params;
+        VarLibrary.set_ctype (C_FunPointer (ret_type, typedparams_types)) id;
         let rev_st =
           assign_last_value_of_statement (ret_type, ret_var_id) (lambda_to_trev_statements env body)
         in
@@ -625,7 +637,6 @@ let compile_implementation modulename lambda =
           rev_st @
           [C_VarDeclare (ret_type, C_Variable ret_var_id, None)]
         in
-        VarLibrary.set_ctype (C_FunPointer (ret_type, List.map fst typedparams)) id;
         [C_FunDefn (ret_type, C_Variable id, typedparams, Some cbody)]
     | _ ->
         let ctype, sl = lambda_to_trev_statements env lam in
