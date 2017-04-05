@@ -19,7 +19,7 @@ ocaml_value_t *Printf;
 
 void Printf__init() {
     Printf = malloc(2 * sizeof(ocaml_value_t));
-    Printf[1].f = (generic_fp_t) &ocaml_printf;
+    Printf[1].fp = (generic_funcp_t) &ocaml_printf;
 }
 
 void Test__init();

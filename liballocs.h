@@ -2,13 +2,16 @@
 #define OCAML_LIBALLOCS_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #define STATIC_ASSERT(COND,MSG) typedef char static_assertion_##MSG[(COND)?1:-1]
 
-typedef void *generic_datap_t;
-typedef void (*generic_funcp_t)();
+union _ocaml_value_t;
 
-typedef union {
+typedef union _ocaml_value_t *generic_datap_t;
+typedef union _ocaml_value_t (*generic_funcp_t)();
+
+typedef union _ocaml_value_t {
     int64_t         i;
     double          d;
     generic_datap_t p;
