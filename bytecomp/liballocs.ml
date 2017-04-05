@@ -590,7 +590,9 @@ let compile_implementation modulename lambda =
         let cexpr_cond = cast C_Bool (lambda_to_texpression env l) in
         let ctype_t, rev_st_t = lambda_to_trev_statements env lt in
         let ctype_f, rev_st_f = lambda_to_trev_statements env lf in
-        assert (ctype_t = ctype_f);
+        if ctype_t <> ctype_f then (
+          failwith (Printf.sprintf "if and else have different types? %s vs %s\n" (ctype_to_string ctype_t) (ctype_to_string ctype_f))
+        );
         ctype_t, [C_If (cexpr_cond, rev_st_t, rev_st_f)]
     | lam -> failwith ("lambda_to_trev_statements " ^ (formats Printlambda.lambda lam))
   in
