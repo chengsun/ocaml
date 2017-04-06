@@ -43,6 +43,7 @@ module C = struct
     | C_Struct of Ident.t * (ctype * string) list
     | C_FunPointer of ctype * ctype list
     | C_VarArgs
+    | C_WhateverType (* used to type things like Lstaticraise, can unify with any type *)
 
   (* this isn't in emitcode because it's more fundamental and useful for debugging *)
   let rec ctype_to_string = function
@@ -58,7 +59,24 @@ module C = struct
     | C_Struct (id, _) -> "struct " ^ (Ident.unique_name id)
     | C_FunPointer (tyret, tyargs) -> Printf.sprintf "%s(*)(%s)" (ctype_to_string tyret) (map_intersperse_concat ctype_to_string "," tyargs)
     | C_VarArgs -> "..."
+    | C_WhateverType -> "/*UNDERSPECIFIED TYPE!*/"
 
+
+  (* unifies two compatible ctypes, returns the most general of the two (which the other should be casted to)
+   * returns a type which both types can guaranteed to be [cast]ed to validly
+   * however not all types that both at and bt can be [cast]ed to are eligible for returning! (e.g. what's more general, void( * )() or int( * )()?)
+   *)
+  let unified_ctype ?hint at bt =
+    if at = bt then at
+    else if at = C_WhateverType then bt
+    else if bt = C_WhateverType then at
+    else if at = C_Boxed || bt = C_Boxed then C_Boxed
+    else (
+      failwith (Printf.sprintf "%scan't unify two different types: %s and %s\n"
+        (match hint with None -> "" | Some x -> x ^ ": ")
+        (ctype_to_string at)
+        (ctype_to_string bt))
+    )
 
   let rec canon_ctype = function
     | C_CommentedType (t,_) -> canon_ctype t
@@ -88,8 +106,20 @@ module C = struct
     | C_Assign of expression * expression
     | C_If of expression * statement list * statement list (* reversed! *)
     | C_Return of expression option
+    | C_LabelDecl of string
+    | C_LabelGoto of string
 
   and texpression = ctype * expression
+
+  (* just for debugging, nothing useful *)
+  let statement_to_debug_string = function
+    | C_Expression _ -> "C_Expression"
+    | C_VarDeclare _ -> "C_VarDeclare"
+    | C_Assign _ -> "C_Assign"
+    | C_If _ -> "C_If"
+    | C_Return _ -> "C_Return"
+    | C_LabelDecl _ -> "C_LabelDecl"
+    | C_LabelGoto _ -> "C_LabelGoto"
 
   type toplevel =
     | C_TopLevelComment of string
@@ -113,7 +143,9 @@ module C = struct
     | C_Pointer _ | C_FunPointer _ | C_Boxed | C_Int | C_Double | C_UInt -> 1
     | C_Struct (_, tys) -> List.fold_left (fun acc (t,_) -> acc + (ctype_size_nwords t)) 0 tys
     | C_Bool | C_Char -> failwith "bools/chars have sub-word size"
-    | C_VarArgs | C_Void -> failwith "invalid ctype to query size for"
+    | C_VarArgs | C_Void | C_WhateverType ->
+        failwith "invalid ctype to query size for"
+
 
 
   let rec cast target_ctype (source_ctype, source_cexpr) =
@@ -127,6 +159,8 @@ module C = struct
     in
     let st = canon_ctype source_ctype in
     let tt = canon_ctype target_ctype in
+    let st = if st = C_WhateverType then tt else st in
+    let tt = if tt = C_WhateverType then st else tt in
     if st = tt then (
       source_cexpr
     ) else if st <> C_Boxed && tt <> C_Boxed then (
@@ -142,8 +176,8 @@ module C = struct
       C_Cast (tt, source_cexpr)
     ) else if st = C_Boxed then (
       (* we need to unbox according to target_ctype *)
-      let box_field, _box_canon_type = box_kind tt in
-      C_Cast (tt, C_Field (source_cexpr, box_field))
+      let box_field, box_canon_type = box_kind tt in
+      cast tt (box_canon_type, C_Field (source_cexpr, box_field))
     ) else if tt = C_Boxed then (
       (* we need to box according to source_ctype *)
       let box_field, box_canon_type = box_kind st in
@@ -154,8 +188,6 @@ module C = struct
                , " }"))
     ) else failwith "unreachable"
 
-
-
   (* for extracting C_InlineRevStatements. assigns the final expression to the
    * variable [id] *)
   let rec assign_last_value_of_statement (tgt_type,id) (src_type,sl) =
@@ -163,14 +195,32 @@ module C = struct
     match sl with
     | [] -> failwith "assign_last_value_of_statement: empty sl" (* TODO: unit? *)
     | s::sl ->
-        begin
-          match s with
-          | C_Expression e -> f e :: sl
-          | C_VarDeclare _ -> failwith "assign_last_value_of_statement: unexpected C_VarDeclare as last statement in sl"
-          | C_Assign (varid,e) -> f varid :: C_Assign (varid,e) :: sl
-          | C_If (e,slt, slf) -> C_If (e, assign_last_value_of_statement (tgt_type,id) (src_type,slt), assign_last_value_of_statement (tgt_type,id) (src_type,slf)) :: sl
-          | C_Return _ -> failwith "assign_last_value_of_statement: unexpected C_Return as last statement in sl"
-        end
+      begin
+        match s with
+        | C_Expression e -> f e :: sl
+        | C_Assign (varid,e) -> f varid :: s::sl
+        | C_If (e,slt, slf) ->
+            C_If (e,
+              assign_last_value_of_statement (tgt_type,id) (src_type,slt),
+              assign_last_value_of_statement (tgt_type,id) (src_type,slf)) :: sl
+        | C_Return _ | C_LabelGoto _ -> s :: sl (* the requested assignment doesn't matter, we're gone! *)
+        | C_VarDeclare _ | C_LabelDecl _ ->
+            failwith (Printf.sprintf "assign_last_value_of_statement: unexpected statement %s as last statement in sl" (statement_to_debug_string s))
+      end
+
+
+  (* a wrapper around assign_last_value_of_statement: casts type of sl *)
+  let rec cast_revst target_ctype (source_ctype, source_sl) =
+    let st = canon_ctype source_ctype in
+    let tt = canon_ctype target_ctype in
+    if st = tt then (
+      source_sl
+    ) else (
+      let id = Ident.create "__typecasted" in
+      [C_Expression (C_Variable id)] @
+      assign_last_value_of_statement (target_ctype, id) (source_ctype, source_sl) @
+      [C_VarDeclare (target_ctype, C_Variable id, None)]
+    )
 
 end
 
@@ -248,6 +298,8 @@ module Emitcode = struct
         (map_intersperse_concat statement_to_string "\n" (List.rev fs)) ^ "\n}"
     | C_Return (Some e) -> "return " ^ (expression_to_string e) ^ ";"
     | C_Return None -> "return;"
+    | C_LabelDecl s -> s ^ ":;"
+    | C_LabelGoto s -> "goto " ^ s ^ ";"
 
   and rev_statements_to_string sl = map_intersperse_concat statement_to_string "\n" (List.rev sl)
 
@@ -541,6 +593,8 @@ let compile_implementation modulename lambda =
                 List.map (fun x -> cast C_Boxed (lambda_to_texpression env x)) lam
               in
               C_Boxed, C_FunCall (C_GlobalVariable prim_name, args)
+          | Praise(Raise_regular | Raise_reraise), [e] ->
+              C_WhateverType, C_FunCall (C_GlobalVariable "ocaml_liballocs_raise_exn", [cast C_Boxed (lambda_to_texpression env e)])
           | _ -> failwith ("lambda_to_expression Lprim " ^ (Printlambda.name_of_primitive prim))
         end
     | Lconst sc -> structured_constant_to_texpression env sc
@@ -581,6 +635,12 @@ let compile_implementation modulename lambda =
     | _ -> failwith ("lambda_to_expression " ^ (formats Printlambda.lambda lam))
 
   and lambda_to_trev_statements env lam =
+    let unify_revsts ?hint (ctype_a, sl_a) (ctype_b, sl_b) =
+      let ctype = unified_ctype ?hint ctype_a ctype_b in
+      let sl_a = cast_revst ctype (ctype_a, sl_a) in
+      let sl_b = cast_revst ctype (ctype_b, sl_b) in
+      (ctype, sl_a, sl_b)
+    in
     match lam with
     | Levent (body, ev) ->
         lambda_to_trev_statements (Envaux.env_from_summary ev.lev_env Subst.identity) body
@@ -603,12 +663,32 @@ let compile_implementation modulename lambda =
         ctype2, rev_st2 @ rev_st1
     | Lifthenelse (l,lt,lf) ->
         let cexpr_cond = cast C_Bool (lambda_to_texpression env l) in
-        let ctype_t, rev_st_t = lambda_to_trev_statements env lt in
-        let ctype_f, rev_st_f = lambda_to_trev_statements env lf in
-        if ctype_t <> ctype_f then (
-          failwith (Printf.sprintf "if and else have different types? %s vs %s\n" (ctype_to_string ctype_t) (ctype_to_string ctype_f))
-        );
-        ctype_t, [C_If (cexpr_cond, rev_st_t, rev_st_f)]
+        let trev_t = lambda_to_trev_statements env lt in
+        let trev_f = lambda_to_trev_statements env lf in
+        let (ctype, sl_t, sl_f) = unify_revsts ~hint:"ifthenelse" trev_t trev_f in
+        ctype, [C_If (cexpr_cond, sl_t, sl_f)]
+    | Ltrywith (lbody, param, lhandler) ->
+        VarLibrary.set_ctype C_Boxed param;
+        let trev_body = lambda_to_trev_statements env lbody in
+        let trev_hand = lambda_to_trev_statements env lhandler in
+        let (ctype, sl_body, sl_hand) = unify_revsts ~hint:"trywith" trev_body trev_hand in
+        let sl_hand = sl_hand @ [
+            C_VarDeclare (C_Boxed, C_Variable param, Some (C_FunCall (C_GlobalVariable "ocaml_liballocs_get_exn", [])))
+          ]
+        in
+        ctype, [C_If (C_FunCall (C_GlobalVariable "ocaml_liballocs_push_exn_handler", []),
+          sl_body, sl_hand)]
+    | Lstaticcatch (lbody, (id, [](*vars, what do?*)), lhandler) ->
+        let trev_body = lambda_to_trev_statements env lbody in
+        let trev_hand = lambda_to_trev_statements env lhandler in
+        let (ctype, sl_body, sl_hand) = unify_revsts ~hint:"staticcatch" trev_body trev_hand in
+        ctype, [C_If (C_IntLiteral 1, sl_body, sl_hand @ [
+          C_LabelDecl (Printf.sprintf "label_staticcatch_%d" id)
+        ])]
+    | Lstaticraise (id, [](*vars, what do?*)) ->
+        C_WhateverType,
+        [C_LabelGoto (Printf.sprintf "label_staticcatch_%d" id)]
+
     | lam -> failwith ("lambda_to_trev_statements " ^ (formats Printlambda.lambda lam))
   in
 
@@ -705,10 +785,14 @@ let compile_implementation modulename lambda =
         accum, name
     | C_IntLiteral _ | C_PointerLiteral _ | C_StringLiteral _ | C_CharLiteral _
     | C_Variable _ | C_GlobalVariable _ | C_Allocate _ -> accum, e
-    | C_Blob (s1,e,s2) -> let (accum', e') = fixup_expression accum e in accum', C_Blob (s1,e',s2)
-    | C_Field (e,f) -> let (accum', e') = fixup_expression accum e in accum', C_Field (e',f)
-    | C_ArrayIndex (e,i) -> let (accum', e') = fixup_expression accum e in accum', C_ArrayIndex (e',i)
-    | C_Cast (ty,e) -> let (accum', e') = fixup_expression accum e in accum', C_Cast (ty,e')
+    | C_Blob (s1,e,s2) ->
+        let (accum', e') = fixup_expression accum e in accum', C_Blob (s1,e',s2)
+    | C_Field (e,f) ->
+        let (accum', e') = fixup_expression accum e in accum', C_Field (e',f)
+    | C_ArrayIndex (e,i) ->
+        let (accum', e') = fixup_expression accum e in accum', C_ArrayIndex (e',i)
+    | C_Cast (ty,e) ->
+        let (accum', e') = fixup_expression accum e in accum', C_Cast (ty,e')
     | C_BinaryOp (ty,e1,e2) ->
         let (accum', e1') = fixup_expression accum e1 in
         let (accum'', e2') = fixup_expression accum' e2 in
@@ -737,17 +821,18 @@ let compile_implementation modulename lambda =
     and loop accum = function
       | [] -> accum
       | s::statements ->
-          let accum'' =
-            match s with
-            | C_Expression e -> let (accum', e') = fixup_expression accum e in (C_Expression e') :: accum'
-            | C_VarDeclare (ty,eid,None) -> C_VarDeclare (ty,eid,None) :: accum
-            | C_VarDeclare (ty,eid,Some e) -> let (accum', e') = fixup_expression accum e in C_VarDeclare (ty,eid,Some e') :: accum'
-            | C_Assign (eid,e) -> let (accum', e') = fixup_expression accum e in C_Assign (eid,e') :: accum'
-            | C_If (e,slt,slf) -> let (accum', e') = fixup_expression accum e in (C_If (e', loop_start [] slt, loop_start [] slf)) :: accum'
-            | C_Return (None) -> C_Return (None) :: accum
-            | C_Return (Some e) -> let (accum', e') = fixup_expression accum e in (C_Return (Some e')) :: accum'
-          in
-          loop accum'' statements
+        let accum'' =
+          match s with
+          | C_Expression e -> let (accum', e') = fixup_expression accum e in (C_Expression e') :: accum'
+          | C_VarDeclare (ty,eid,None) -> C_VarDeclare (ty,eid,None) :: accum
+          | C_VarDeclare (ty,eid,Some e) -> let (accum', e') = fixup_expression accum e in C_VarDeclare (ty,eid,Some e') :: accum'
+          | C_Assign (eid,e) -> let (accum', e') = fixup_expression accum e in C_Assign (eid,e') :: accum'
+          | C_If (e,slt,slf) -> let (accum', e') = fixup_expression accum e in (C_If (e', loop_start [] slt, loop_start [] slf)) :: accum'
+          | C_Return (Some e) -> let (accum', e') = fixup_expression accum e in (C_Return (Some e')) :: accum'
+          | C_Return (None) | C_LabelDecl _ | C_LabelGoto _ ->
+              s :: accum
+        in
+        loop accum'' statements
     in
     loop_start accum sl
   in
