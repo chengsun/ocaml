@@ -1,3 +1,5 @@
+#define _DEFAULT_SOURCE     // for MAP_ANONYMOUS
+
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdint.h>

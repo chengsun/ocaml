@@ -470,9 +470,9 @@ let compile_implementation modulename lambda =
     C_Allocate(ctype, n, type_expr_result)
   in
 
-  let module_initialiser_name module_id = (Ident.name module_id) ^ "__init" in
+  let module_initialiser_name module_name = module_name ^ "__init" in
 
-  let global_decls = ref [] in
+  let extern_decls = ref [] in
 
   (* translate a let* to a variable or function declaration *)
   let rec let_to_rev_statements env id lam =
@@ -480,7 +480,6 @@ let compile_implementation modulename lambda =
     | Levent (body, ev) ->
         let_to_rev_statements (Envaux.env_from_summary ev.lev_env Subst.identity) id body
     | Lfunction { params ; body } ->
-        (* NB: let_args_to_toplevels copies this for now, it will go eventually *)
         Printf.printf "Got a expression fun LET %s\n%!" (Ident.unique_name id);
         let typedparams = List.map (fun id ->
             (*ENV
@@ -560,20 +559,20 @@ let compile_implementation modulename lambda =
               if List.mem id Predef.all_predef_exns then begin
                 (* this is a predefined exception *)
                 VarLibrary.set_ctype C_Boxed id;
-                global_decls :=
+                extern_decls :=
                   C_ExternDecl (C_Boxed, C_GlobalVariable (Ident.name id)) ::
-                  !global_decls;
+                  !extern_decls;
                 C_Boxed, C_GlobalVariable (Ident.name id)
               end else begin
                 (* assume these are declarations of use of external modules; ensure initialisation *)
-                global_decls :=
-                  C_FunDefn (C_Void, C_GlobalVariable (module_initialiser_name id), [], None) ::
+                extern_decls :=
+                  C_FunDefn (C_Void, C_GlobalVariable (module_initialiser_name (Ident.name id)), [], None) ::
                   C_ExternDecl (C_Pointer C_Boxed, C_GlobalVariable (Ident.name id)) ::
-                  !global_decls;
+                  !extern_decls;
                 C_Pointer C_Boxed, (* all modules are represented as arrays of ocaml_value_t *)
                 C_InlineRevStatements (VarLibrary.ctype id,
                   [ C_Expression (C_GlobalVariable (Ident.name id))
-                  ; C_Expression (C_FunCall (C_GlobalVariable (module_initialiser_name id), []))])
+                  ; C_Expression (C_FunCall (C_GlobalVariable (module_initialiser_name (Ident.name id)), []))])
               end
           | Popaque, [lam] ->
               (* TODO: can't this be handled recursively? *)
@@ -679,10 +678,10 @@ let compile_implementation modulename lambda =
                       arg_ctypes ap_args
         in
         ret_ctype, C_FunCall (cast apfunc_actual_ctype (ctype, expr), cargs)
-    | Lifthenelse _ ->
+    | _ ->
+        (* fall back to trying full blown statements (inlined for now) *)
         let ctype, rev_st = lambda_to_trev_statements env lam in
         ctype, C_InlineRevStatements (ctype, rev_st)
-    | _ -> failwith ("lambda_to_texpression " ^ (formats Printlambda.lambda lam))
 
   and lambda_to_trev_statements env lam =
     let unify_revsts ?hint (ctype_a, sl_a) (ctype_b, sl_b) =
@@ -765,89 +764,17 @@ let compile_implementation modulename lambda =
     | lam -> failwith ("lambda_to_trev_statements " ^ (formats Printlambda.lambda lam))
   in
 
-  let static_constructors = ref [] in
-
-  let rec let_args_to_toplevels env id lam = (* FIXME: get rid of this soon! we can probably handle everything "inline", with toplevels only created at fixup *)
-    match lam with
-    | Levent (body, ev) ->
-        let_args_to_toplevels (Envaux.env_from_summary ev.lev_env Subst.identity) id body
-    | Lfunction { params ; body } ->
-        Printf.printf "Got a fun LET %s\n%!" (Ident.unique_name id);
-        let typedparams = List.map (fun id ->
-            (*ENV
-              Printf.printf "We have these in env: %s\n%!" (dumps_env env);
-              Printf.printf "Looking up type of %s\n%!" (Ident.unique_name id);
-              let (p, ty) = Env.lookup_value (Longident.Lident (Ident.name id)) env in
-              C_Boxed ty.val_type, id
-            *)
-            C_Boxed, id
-          ) params in
-        (* TODO: determine ret type of function*)
-        let ret_type = C_Boxed in
-        let typedparams_types = List.map fst typedparams in
-        let ret_var_id = VarLibrary.create ret_type "_return_value" in
-        (* be careful to assign the param types before lambda_to_trev_statements *)
-        List.iter2 (fun ctype id -> VarLibrary.set_ctype ctype id) typedparams_types params;
-        VarLibrary.set_ctype (C_FunPointer (ret_type, typedparams_types)) id;
-        let rev_st =
-          assign_last_value_of_statement (ret_type, ret_var_id) (lambda_to_trev_statements env body)
-        in
-        let cbody =
-          [C_Return (Some (C_Variable ret_var_id))] @
-          rev_st @
-          [C_VarDeclare (ret_type, C_Variable ret_var_id, None)]
-        in
-        [C_FunDefn (ret_type, C_Variable id, typedparams, Some cbody)]
-    | _ ->
-        let ctype, sl = lambda_to_trev_statements env lam in
-        let cbody =
-          C_Assign (C_Variable id, C_InlineRevStatements (ctype, sl))
-        in
-        static_constructors := cbody :: !static_constructors;
-        VarLibrary.set_ctype ctype id;
-        [ C_GlobalDefn (ctype, C_Variable id, None) ]
-  in
-
-  let rec lambda_to_toplevels module_id env lam =
-    match lam with
-    | Levent (body, ev) ->
-        lambda_to_toplevels module_id (Envaux.env_from_summary ev.lev_env Subst.identity) body
-    | Llet (_strict, id, args, body) ->
-        Printf.printf "Got a LET %s\n%!" (Ident.unique_name id);
-        (* evaluation order important for type propagation *)
-        let a = let_args_to_toplevels env id args in
-        let b = lambda_to_toplevels module_id env body in
-        a @ b
-    | Lletrec ([id, args], body) ->
-        Printf.printf "Got a LETREC %s\n%!" (Ident.unique_name id);
-        (* evaluation order important for type propagation *)
-        let a = let_args_to_toplevels env id args in
-        let b = lambda_to_toplevels module_id env body in
-        a @ b
-    | Lsequence (l1, l2) -> (* TODO: dedup this... *)
-        let cbody_rev = snd (lambda_to_trev_statements env l1) in
-        static_constructors := cbody_rev @ !static_constructors;
-        lambda_to_toplevels module_id env l2
-    | Lprim (Pmakeblock(tag, Immutable, tyinfo), largs) ->
-        (* This is THE immutable makeblock at the toplevel. *)
-        let ctype, es = lambda_to_texpression env lam in
-        assert (ctype = C_Pointer C_Boxed);
-        let export_var = C_GlobalVariable (Ident.name module_id) in (* no need to add export var to VarLibrary *)
-        static_constructors := C_Assign (export_var, es) :: !static_constructors;
-        [C_GlobalDefn (ctype, export_var, None) (* .bss initialised to NULL *)]
-    | _ -> failwith ("lambda_to_toplevels " ^ (formats Printlambda.lambda lam))
-  in
-
-
   let deinlined_funs = ref [] in (* TODO: one day we want them to be attached near their users *)
 
   let rec fixup_expression accum e = (* sticks inlined statements on the front of accum *)
     match e with
     | C_InlineRevStatements (_, []) -> failwith "fixup_expression: invalid inlinerevstatements (empty)"
-    | C_InlineRevStatements (_ctype, C_Expression e::sl) ->
-        let (accum', e') = fixup_expression accum e in
-        (fixup_rev_statements accum' sl), e'
-    | C_InlineRevStatements (ctype,sl) ->
+    | C_InlineRevStatements (_ctype, C_Expression e::sl) -> (* avoid creating a deinlined variable if we already have the expression *)
+        (* NB: order matters! *)
+        let sl' = fixup_rev_statements accum sl in
+        let (sl'', e') = fixup_expression sl' e in
+        sl'', e'
+    | C_InlineRevStatements (ctype, sl) ->
         let id = Ident.create "__deinlined" in
         let sl' = fixup_rev_statements ((C_VarDeclare (ctype, C_Variable id, None))::accum) sl in
         let sl'' = assign_last_value_of_statement (ctype,id) (ctype,sl') in
@@ -917,24 +844,23 @@ let compile_implementation modulename lambda =
   in
 
 
-  let toplevels =
+  let module_ctype = C_Pointer C_Boxed in
+  let module_export_var = C_GlobalVariable modulename in (* no need to add export var to VarLibrary *)
+  let toplevel_sl =
     match lambda with
     | Lprim (Psetglobal id, [lam]) when Ident.name id = modulename ->
-        lambda_to_toplevels id Env.empty lam
+        let ctype, es = lambda_to_texpression Env.empty lam in
+        assert (ctype = module_ctype);
+        [C_Assign (module_export_var, es)]
     | lam -> failwith ("compile_implementation unexpected root: " ^ (formats Printlambda.lambda lam))
   in
-  let fixed_toplevels =
-    List.map (map_toplevel (fixup_rev_statements [])) toplevels
-  in
-
-  let module_id = Ident.create modulename in
-  let fixed_static_constructors =
-    C_If (C_GlobalVariable modulename,
-          [C_Return None],
-          fixup_rev_statements [] !static_constructors)
-  in
+  let fixed_toplevel_sl = fixup_rev_statements [] toplevel_sl in
   let the_module_constructor =
-    C_FunDefn (C_Void, C_GlobalVariable (module_initialiser_name module_id), [], Some [fixed_static_constructors])
+    C_FunDefn (C_Void, C_GlobalVariable (module_initialiser_name modulename), [], Some [
+      C_If (C_GlobalVariable modulename,
+            [C_Return None],
+            fixed_toplevel_sl)
+    ])
   in
 
   (* NB: should be evaluated last when we know all types *)
@@ -943,9 +869,8 @@ let compile_implementation modulename lambda =
   in
 
   [C_TopLevelComment "global typedecls:"] @ global_typedecls @
-  [C_TopLevelComment "extern decls:"] @ !global_decls @
+  [C_TopLevelComment "extern decls:"] @ !extern_decls @
   [C_TopLevelComment "deinlined functions:"] @ !deinlined_funs @
-  [C_TopLevelComment "fixed toplevels:"] @ fixed_toplevels @
-  [C_TopLevelComment "the module constructor:" ; the_module_constructor]
-
-;;
+  [ C_TopLevelComment "the module constructor:"
+  ; C_GlobalDefn (module_ctype, module_export_var, None) (* .bss initialised to NULL *)
+  ; the_module_constructor]
