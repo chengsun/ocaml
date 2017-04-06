@@ -502,6 +502,10 @@ let ( ^^ ) (Format (fmt1, str1)) (Format (fmt2, str2)) = failwith "unimplemented
 
 (* Miscellaneous *)
 
+let at_exit f = failwith "unimplemented"
+let do_at_exit () = failwith "unimplemented"
+let exit retcode = failwith "unimplemented"
+(*
 external sys_exit : int -> 'a = "caml_sys_exit"
 
 let exit_function = ref flush_all
@@ -517,3 +521,4 @@ let exit retcode =
   sys_exit retcode
 
 let _ = register_named_value "Pervasives.do_at_exit" do_at_exit
+  *)
