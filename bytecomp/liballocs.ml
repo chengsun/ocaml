@@ -452,6 +452,15 @@ module VarLibrary = struct
 end
 
 
+let module_initialiser_name module_name = module_name ^ "__init"
+
+
+module Translate = struct
+
+let extern_decls = ref []
+
+let reset () =
+  extern_decls := []
 
 let do_allocation nwords (type_expr_result : _ result) =
   let ctype, n =
@@ -464,10 +473,6 @@ let do_allocation nwords (type_expr_result : _ result) =
     | Error _ -> C_Boxed, nwords
   in
   C_Allocate(ctype, n, type_expr_result)
-
-let module_initialiser_name module_name = module_name ^ "__init"
-
-let extern_decls = ref []
 
 (* translate a let* to a variable or function declaration *)
 let rec let_to_rev_statements env id lam =
@@ -758,6 +763,8 @@ and lambda_to_trev_statements env lam =
 
   | lam -> failwith ("lambda_to_trev_statements " ^ (formats Printlambda.lambda lam))
 
+end
+
 module Fixup = struct
 
 let deinlined_funs = ref [] (* TODO: one day we want them to be attached near their users *)
@@ -847,15 +854,15 @@ end
 let compile_implementation modulename lambda =
   let () = TypeLibrary.reset () in
   let () = VarLibrary.reset () in
+  let () = Translate.reset () in
   let () = Fixup.reset () in
-  let () = extern_decls := [] in
 
   let module_ctype = C_Pointer C_Boxed in
   let module_export_var = C_GlobalVariable modulename in (* no need to add export var to VarLibrary *)
   let toplevel_sl =
     match lambda with
     | Lprim (Psetglobal id, [lam]) when Ident.name id = modulename ->
-        let ctype, es = lambda_to_texpression Env.empty lam in
+        let ctype, es = Translate.lambda_to_texpression Env.empty lam in
         assert (ctype = module_ctype);
         [C_Assign (module_export_var, es)]
     | lam -> failwith ("compile_implementation unexpected root: " ^ (formats Printlambda.lambda lam))
@@ -875,7 +882,7 @@ let compile_implementation modulename lambda =
   in
 
   [C_TopLevelComment "global typedecls:"] @ global_typedecls @
-  [C_TopLevelComment "extern decls:"] @ !extern_decls @
+  [C_TopLevelComment "extern decls:"] @ !Translate.extern_decls @
   [C_TopLevelComment "deinlined functions:"] @ !Fixup.deinlined_funs @
   [ C_TopLevelComment "the module constructor:"
   ; C_GlobalDefn (module_ctype, module_export_var, None) (* .bss initialised to NULL *)
