@@ -202,7 +202,7 @@ int main() {
         Test__init();
         return 0;
     } else { // catch
-        fprintf(stderr, "Fatal uncaught OCaml exception: %s\n",
+        fprintf(stderr, "Uncaught OCaml exception: %s\n",
                 (const char *)ocaml_liballocs_g_exn_handler_exn.p[0].p);
         return 1;
     }
