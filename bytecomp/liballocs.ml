@@ -98,6 +98,7 @@ module C = struct
     | C_Field of expression * string (* <...>.foo *)
     | C_InitialiserList of expression list (* { <...>, <...> } *)
     | C_Cast of ctype * expression
+    | C_UnaryOp of string * expression
     | C_BinaryOp of string * expression * expression
     | C_FunCall of expression * expression list
     | C_Allocate of ctype * int(*multiplier*) * (Types.type_expr, string) result (* for debugging only *)
@@ -273,6 +274,7 @@ module Emitcode = struct
     | C_ArrayIndex (e,None) -> (expression_to_string e) ^ "[]"
     | C_InitialiserList es -> Printf.sprintf "{%s}" (map_intersperse_concat expression_to_string ", " es)
     | C_Cast (ty,e) -> Printf.sprintf "((%s)%s)" (ctype_to_string ty) (expression_to_string e)
+    | C_UnaryOp (op,x) -> "(" ^ op ^ (expression_to_string x) ^ ")"
     | C_BinaryOp (op,x,y) -> "(" ^ (expression_to_string x) ^ op ^ (expression_to_string y) ^ ")"
     | C_FunCall (e_id,es) ->
         (expression_to_string e_id) ^ "(" ^ (map_intersperse_concat expression_to_string ", " es) ^ ")"
@@ -535,8 +537,14 @@ let compile_implementation modulename lambda =
                         cast expected_type (lambda_to_texpression env e1),
                         cast expected_type (lambda_to_texpression env e2))
           in
+          let uop expected_type op e =
+            expected_type,
+            C_UnaryOp (op,
+                       cast expected_type (lambda_to_texpression env e))
+          in
           let bool_bop = bop C_Bool in
           let int_bop = bop C_Int in
+          let int_uop = uop C_Int in
           match prim, largs with
           | Popaque, [Lprim (Pgetglobal id, [])] ->
               if List.mem id Predef.all_predef_exns then begin
@@ -595,6 +603,8 @@ let compile_implementation modulename lambda =
           | Porint, [e1;e2] -> int_bop "|" e1 e2
           | Pxorint, [e1;e2] -> int_bop "^" e1 e2
           | Plslint, [e1;e2] -> int_bop "<<" e1 e2
+          | Plsrint, [e1;e2] -> bop C_UInt ">>" e1 e2
+          | Pnegint, [e] -> int_uop "-" e
           | Pintcomp(Ceq), [e1;e2] -> int_bop "==" e1 e2
           | Pintcomp(Cneq), [e1;e2] -> int_bop "!=" e1 e2
           | Pintcomp(Clt), [e1;e2] -> int_bop "<" e1 e2
@@ -807,10 +817,12 @@ let compile_implementation modulename lambda =
         let (accum', e') = fixup_expression accum e in accum', C_ArrayIndex (e',i)
     | C_Cast (ty,e) ->
         let (accum', e') = fixup_expression accum e in accum', C_Cast (ty,e')
-    | C_BinaryOp (ty,e1,e2) ->
+    | C_UnaryOp (op,e) ->
+        let (accum', e') = fixup_expression accum e in accum', C_UnaryOp (op,e')
+    | C_BinaryOp (op,e1,e2) ->
         let (accum', e1') = fixup_expression accum e1 in
         let (accum'', e2') = fixup_expression accum' e2 in
-        accum'', C_BinaryOp (ty,e1',e2')
+        accum'', C_BinaryOp (op,e1',e2')
     | C_InitialiserList es ->
         let rec loop accum es' = function
           | [] -> accum, List.rev es'
