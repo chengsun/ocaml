@@ -183,6 +183,18 @@ let rec find p = function
   | [] -> raise Not_found
   | x :: l -> if p x then x else find p l
 
+let find_all p = failwith "TODO"
+let filter p = failwith "TODO"
+let partition p l = failwith "TODO"
+let merge cmp l1 l2 = failwith "TODO"
+let sort_uniq cmp l = failwith "TODO"
+let sort cmp l = failwith "TODO"
+let stable_sort cmp l = failwith "TODO"
+let fast_sort cmp l = failwith "TODO"
+let combine l1 l2 = failwith "TODO"
+let split l = failwith "TODO"
+
+(*
 let find_all p =
   let rec find accu = function
   | [] -> rev accu
@@ -430,3 +442,4 @@ let sort_uniq cmp l =
   in
   let len = length l in
   if len < 2 then l else sort len l
+*)

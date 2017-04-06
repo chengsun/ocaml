@@ -71,6 +71,8 @@ module C = struct
     else if at = C_WhateverType then bt
     else if bt = C_WhateverType then at
     else if at = C_Boxed || bt = C_Boxed then C_Boxed
+    else if at = C_Pointer C_Void then bt (* HACK: lambda likes to use Const_pointer 0 to represent nil, false, ... *)
+    else if bt = C_Pointer C_Void then at
     else (
       failwith (Printf.sprintf "%scan't unify two different types: %s and %s\n"
         (match hint with None -> "" | Some x -> x ^ ": ")
@@ -466,7 +468,7 @@ let compile_implementation modulename lambda =
 
   let module_initialiser_name module_id = (Ident.name module_id) ^ "__init" in
 
-  let globals = ref [] in
+  let global_decls = ref [] in
 
   (* translate a let* to a variable or function declaration *)
   let rec let_to_rev_statements env id lam =
@@ -537,12 +539,24 @@ let compile_implementation modulename lambda =
           let int_bop = bop C_Int in
           match prim, largs with
           | Popaque, [Lprim (Pgetglobal id, [])] ->
-              (* assume these are declarations of use of external modules; ensure initialisation *)
-              globals := id :: !globals;
-              C_Pointer C_Boxed, (* all modules are represented as arrays of ocaml_value_t *)
-              C_InlineRevStatements (VarLibrary.ctype id,
-                [ C_Expression (C_GlobalVariable (Ident.name id))
-                ; C_Expression (C_FunCall (C_GlobalVariable (module_initialiser_name id), []))])
+              if List.mem id Predef.all_predef_exns then begin
+                (* this is a predefined exception *)
+                VarLibrary.set_ctype C_Boxed id;
+                global_decls :=
+                  C_ExternDecl (C_Boxed, C_GlobalVariable (Ident.name id)) ::
+                  !global_decls;
+                C_Boxed, C_GlobalVariable (Ident.name id)
+              end else begin
+                (* assume these are declarations of use of external modules; ensure initialisation *)
+                global_decls :=
+                  C_FunDefn (C_Void, C_GlobalVariable (module_initialiser_name id), [], None) ::
+                  C_ExternDecl (C_Pointer C_Boxed, C_GlobalVariable (Ident.name id)) ::
+                  !global_decls;
+                C_Pointer C_Boxed, (* all modules are represented as arrays of ocaml_value_t *)
+                C_InlineRevStatements (VarLibrary.ctype id,
+                  [ C_Expression (C_GlobalVariable (Ident.name id))
+                  ; C_Expression (C_FunCall (C_GlobalVariable (module_initialiser_name id), []))])
+              end
           | Popaque, [lam] ->
               (* TODO: can't this be handled recursively? *)
               let ctype, rev_st = lambda_to_trev_statements env lam in
@@ -858,21 +872,13 @@ let compile_implementation modulename lambda =
     C_FunDefn (C_Void, C_GlobalVariable (module_initialiser_name module_id), [], Some [fixed_static_constructors])
   in
 
-  let global_decls =
-    List.concat (List.map (fun global_id ->
-        [ C_FunDefn (C_Void, C_GlobalVariable (module_initialiser_name global_id), [], None)
-        ; C_ExternDecl (C_Pointer C_Boxed, C_GlobalVariable (Ident.name global_id))
-        ]
-      ) !globals)
-  in
-
   (* NB: should be evaluated last when we know all types *)
   let global_typedecls =
     List.map (fun ty -> C_TypeDefn ty) (TypeLibrary.dump_all_types_for_definition ())
   in
 
   [C_TopLevelComment "global typedecls:"] @ global_typedecls @
-  [C_TopLevelComment "global decls:"] @ global_decls @
+  [C_TopLevelComment "extern decls:"] @ !global_decls @
   [C_TopLevelComment "deinlined functions:"] @ !deinlined_funs @
   [C_TopLevelComment "fixed toplevels:"] @ fixed_toplevels @
   [C_TopLevelComment "the module constructor:" ; the_module_constructor]
