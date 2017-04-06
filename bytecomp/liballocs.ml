@@ -552,6 +552,8 @@ let compile_implementation modulename lambda =
           let int_bop = bop C_Int in
           let int_uop = uop C_Int in
           match prim, largs with
+          | Pidentity, [x] -> (* why does Pidentity occur? *)
+              lambda_to_texpression env x
           | Popaque, [Lprim (Pgetglobal id, [])] ->
               if List.mem id Predef.all_predef_exns then begin
                 (* this is a predefined exception *)
@@ -625,6 +627,8 @@ let compile_implementation modulename lambda =
               C_Boxed, C_FunCall (C_GlobalVariable prim_name, args)
           | Praise(Raise_regular | Raise_reraise), [e] ->
               C_WhateverType, C_FunCall (C_GlobalVariable "ocaml_liballocs_raise_exn", [cast C_Boxed (lambda_to_texpression env e)])
+          | Pstringlength, [e] ->
+              C_Int, C_FunCall (C_GlobalVariable "strlen", [cast (C_Pointer C_Char) (lambda_to_texpression env e)])
           | _ -> failwith ("lambda_to_expression Lprim " ^ (Printlambda.name_of_primitive prim))
         end
     | Lconst sc -> structured_constant_to_texpression env sc
@@ -718,6 +722,29 @@ let compile_implementation modulename lambda =
     | Lstaticraise (id, [](*vars, what do?*)) ->
         C_WhateverType,
         [C_LabelGoto (Printf.sprintf "label_staticcatch_%d" id)]
+
+    | Lstringswitch (lam, cases, default) ->
+        let default_ctype, default_sl =
+          match default with
+          | Some x -> lambda_to_trev_statements env x
+          | None -> C_WhateverType, []
+        in
+        let switch_ctype = C_Pointer C_Char in
+        let switch_sl = cast switch_ctype (lambda_to_texpression env lam) in
+        let var = Ident.create "__stringswitch" in
+        let trevs = List.map (fun (s,l) -> s, lambda_to_trev_statements env l) cases in
+        let ctype = List.fold_left (fun a (_, (b, _)) -> unified_ctype a b) default_ctype trevs in
+        let sl =
+          List.fold_left (fun acc_sl (s, this_trev) ->
+            let this_sl = cast_revst ctype this_trev in
+            [C_If (
+              C_BinaryOp ("==", C_IntLiteral Int64.zero, C_FunCall (C_GlobalVariable "strcmp", [C_Variable var; C_StringLiteral s])),
+              this_sl,
+              acc_sl
+            )]
+          ) default_sl trevs
+        in
+        ctype, sl @ [C_VarDeclare (switch_ctype, C_Variable var, Some switch_sl)]
 
     | lam -> failwith ("lambda_to_trev_statements " ^ (formats Printlambda.lambda lam))
   in
