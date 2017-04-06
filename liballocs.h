@@ -33,4 +33,6 @@ bool ocaml_liballocs_push_exn_handler();
 ocaml_value_t ocaml_liballocs_get_exn();
 ocaml_value_t ocaml_liballocs_raise_exn(ocaml_value_t exn);
 
+generic_funcp_t ocaml_liballocs_close(generic_funcp_t fun, int n_args, int64_t *env);
+
 #endif
