@@ -552,8 +552,10 @@ let compile_implementation modulename lambda =
           let int_bop = bop C_Int in
           let int_uop = uop C_Int in
           match prim, largs with
-          | Pidentity, [x] -> (* why does Pidentity occur? *)
+          | Pidentity, [x] -> (* why does Pidentity occur? e.g. in Pervasives *)
               lambda_to_texpression env x
+          | Pignore, [x] -> (* why does Pignore occur? e.g. in Pervasives *)
+              C_WhateverType, C_GlobalVariable "NULL" (* this is the closest we'll get to () *)
           | Popaque, [Lprim (Pgetglobal id, [])] ->
               if List.mem id Predef.all_predef_exns then begin
                 (* this is a predefined exception *)
@@ -583,6 +585,16 @@ let compile_implementation modulename lambda =
               (* TODO: make this use type-specific accessors if possible *)
               C_Boxed,
               C_ArrayIndex (cast (C_Pointer C_Boxed) (lambda_to_texpression env lam), Some (C_IntLiteral (Int64.of_int i)))
+          | Psetfield (i, (Immediate | Pointer), Assignment), [lam; lval] ->
+              (* note we assign immediates and pointers in the same way *)
+              (* TODO: make this use type-specific accessors if possible *)
+              C_Boxed,
+              C_InlineRevStatements (C_Boxed, [
+                C_Assign (
+                  C_ArrayIndex (cast (C_Pointer C_Boxed) (lambda_to_texpression env lam), Some (C_IntLiteral (Int64.of_int i))),
+                  cast C_Boxed (lambda_to_texpression env lval)
+                )
+              ])
           | Pmakeblock (tag, mut, tyinfo), contents ->
               let id = Ident.create "__makeblock" in
               let var = C_Variable id in
@@ -670,7 +682,7 @@ let compile_implementation modulename lambda =
     | Lifthenelse _ ->
         let ctype, rev_st = lambda_to_trev_statements env lam in
         ctype, C_InlineRevStatements (ctype, rev_st)
-    | _ -> failwith ("lambda_to_expression " ^ (formats Printlambda.lambda lam))
+    | _ -> failwith ("lambda_to_texpression " ^ (formats Printlambda.lambda lam))
 
   and lambda_to_trev_statements env lam =
     let unify_revsts ?hint (ctype_a, sl_a) (ctype_b, sl_b) =
