@@ -57,6 +57,7 @@ void Test__init();
 *****************************************************************************/
 
 // exception handling
+// TODO: currently this uses an explicit stored singly linked list. I figured this would be easier if I ever needed to debug. but it's really better for neatness/perf if all these next pointers were all implicitly on the stack
 struct ocaml_liballocs_exn_handler {
     jmp_buf env;
     struct ocaml_liballocs_exn_handler *next;
