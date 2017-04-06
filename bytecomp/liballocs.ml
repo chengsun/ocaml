@@ -633,7 +633,7 @@ let compile_implementation modulename lambda =
           | C_FunPointer (x, a) when not vararg ->
               x, a
           | C_Boxed ->
-              (* calling a boxed function poitner -- have to guess... *)
+              (* calling a boxed function pointer -- have to guess... *)
               (* for instance (field 0 (global List!)) *)
               C_Boxed, List.map (fun _ -> C_Boxed) ap_args
           | _ -> failwith "Lapply on non-function expression?"
