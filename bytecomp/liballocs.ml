@@ -88,7 +88,8 @@ module C = struct
     | C_Blob of (string * expression * string)
     | C_InlineRevStatements of ctype * statement list (* putting a statement where an expression belongs; this needs to be extracted in a later pass. ctype necessary annotation *)
     | C_InlineFunDefn of ctype(*return*) * expression(*name*) * (ctype * Ident.t) list * statement list
-    | C_IntLiteral of int
+    | C_IntLiteral of Int64.t
+    | C_FloatLiteral of string
     | C_PointerLiteral of int
     | C_StringLiteral of string
     | C_CharLiteral of char
@@ -263,7 +264,8 @@ module Emitcode = struct
                               (expression_to_string name)
                               (map_intersperse_concat (fun (t,id) -> (ctype_to_string t) ^ " " ^ (Ident.unique_name id)) ", " args)
                               (rev_statements_to_string sl)
-    | C_IntLiteral i -> string_of_int i
+    | C_IntLiteral i -> Int64.to_string i
+    | C_FloatLiteral f -> f
     | C_PointerLiteral i -> Printf.sprintf "((void*)%d)" i
     | C_StringLiteral str -> Printf.sprintf "%S" str
     | C_CharLiteral ch -> Printf.sprintf "%C" ch
@@ -513,7 +515,11 @@ let compile_implementation modulename lambda =
 
   (* Translates a structured constant into an expression and its ctype *)
   and structured_constant_to_texpression env = function
-    | Const_base (Const_int n) -> C_Int, C_IntLiteral n
+    | Const_base (Const_int n) -> C_Int, C_IntLiteral (Int64.of_int n)
+    | Const_base (Const_int32 n) -> C_Int, C_IntLiteral (Int64.of_int32 n)
+    | Const_base (Const_int64 n) -> C_Int, C_IntLiteral n
+    | Const_base (Const_nativeint n) -> C_Int, C_IntLiteral (Int64.of_nativeint n)
+    | Const_base (Const_float f) -> C_Double, C_FloatLiteral f
     | Const_base (Const_char ch) -> C_Int, C_Cast (C_Int, C_CharLiteral ch)(*not C_Char because needs to be word-sized *)
     | Const_base (Const_string (s, None)) -> C_Pointer C_Char, C_StringLiteral s(* FIXME: MUTABLE STRING, SHOULD NOT BE SHARED/just a literal *)
     | Const_pointer n -> C_Pointer C_Void, C_PointerLiteral n
@@ -523,7 +529,7 @@ let compile_implementation modulename lambda =
         (Pmakeblock (tag, Asttypes.Immutable, Error "structured_constant_to_texpression"),
         List.map (fun x -> Lconst x) scl))
       (* we'll recurse back into this function eventually *)
-    | _ -> failwith "structured_constant_to_texpression: unknown constant type"
+    | konst -> failwith (Printf.sprintf "structured_constant_to_texpression: unknown constant type %s" (formats Printlambda.structured_constant konst))
 
   and lambda_to_texpression env lam : C.texpression =
     match lam with
@@ -706,7 +712,7 @@ let compile_implementation modulename lambda =
         let trev_body = lambda_to_trev_statements env lbody in
         let trev_hand = lambda_to_trev_statements env lhandler in
         let (ctype, sl_body, sl_hand) = unify_revsts ~hint:"staticcatch" trev_body trev_hand in
-        ctype, [C_If (C_IntLiteral 1, sl_body, sl_hand @ [
+        ctype, [C_If (C_IntLiteral Int64.one, sl_body, sl_hand @ [
           C_LabelDecl (Printf.sprintf "label_staticcatch_%d" id)
         ])]
     | Lstaticraise (id, [](*vars, what do?*)) ->
@@ -807,7 +813,7 @@ let compile_implementation modulename lambda =
         let sl' = fixup_rev_statements [] sl in
         deinlined_funs := (C_FunDefn (retty, name, args, Some sl')) :: !deinlined_funs;
         accum, name
-    | C_IntLiteral _ | C_PointerLiteral _ | C_StringLiteral _ | C_CharLiteral _
+    | C_IntLiteral _ | C_FloatLiteral _ | C_PointerLiteral _ | C_StringLiteral _ | C_CharLiteral _
     | C_Variable _ | C_GlobalVariable _ | C_Allocate _ -> accum, e
     | C_Blob (s1,e,s2) ->
         let (accum', e') = fixup_expression accum e in accum', C_Blob (s1,e',s2)
