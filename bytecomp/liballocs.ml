@@ -95,7 +95,7 @@ module C = struct
     | C_CharLiteral of char
     | C_GlobalVariable of string
     | C_Variable of Ident.t (* y *)
-    | C_ArrayIndex of expression * int option (* <...>[] or <...>[0] *)
+    | C_ArrayIndex of expression * expression option (* <...>[] or <...>[0] *)
     | C_Field of expression * string (* <...>.foo *)
     | C_InitialiserList of expression list (* { <...>, <...> } *)
     | C_Cast of ctype * expression
@@ -272,7 +272,7 @@ module Emitcode = struct
     | C_GlobalVariable id -> id
     | C_Variable id -> Ident.unique_name id
     | C_Field (e,f) -> Printf.sprintf "%s.%s" (expression_to_string e) f
-    | C_ArrayIndex (e,Some i) -> Printf.sprintf "%s[%d]" (expression_to_string e) i
+    | C_ArrayIndex (e,Some i) -> Printf.sprintf "%s[%s]" (expression_to_string e) (expression_to_string i)
     | C_ArrayIndex (e,None) -> (expression_to_string e) ^ "[]"
     | C_InitialiserList es -> Printf.sprintf "{%s}" (map_intersperse_concat expression_to_string ", " es)
     | C_Cast (ty,e) -> Printf.sprintf "((%s)%s)" (ctype_to_string ty) (expression_to_string e)
@@ -582,7 +582,7 @@ let compile_implementation modulename lambda =
           | Pfield i, [lam] ->
               (* TODO: make this use type-specific accessors if possible *)
               C_Boxed,
-              C_ArrayIndex (cast (C_Pointer C_Boxed) (lambda_to_texpression env lam), Some i)
+              C_ArrayIndex (cast (C_Pointer C_Boxed) (lambda_to_texpression env lam), Some (C_IntLiteral (Int64.of_int i)))
           | Pmakeblock (tag, mut, tyinfo), contents ->
               let id = Ident.create "__makeblock" in
               let var = C_Variable id in
@@ -590,7 +590,7 @@ let compile_implementation modulename lambda =
                 | [] -> (C_Expression var) :: statements
                 | e_head::el ->
                     let texpr = lambda_to_texpression env e_head in
-                    let elem = C_ArrayIndex (var, Some k) in
+                    let elem = C_ArrayIndex (var, Some (C_IntLiteral (Int64.of_int k))) in
                     let assign = C_Assign (elem, cast C_Boxed texpr) in
                     construct (succ k) (assign::statements) el
               in
@@ -629,6 +629,10 @@ let compile_implementation modulename lambda =
               C_WhateverType, C_FunCall (C_GlobalVariable "ocaml_liballocs_raise_exn", [cast C_Boxed (lambda_to_texpression env e)])
           | Pstringlength, [e] ->
               C_Int, C_FunCall (C_GlobalVariable "strlen", [cast (C_Pointer C_Char) (lambda_to_texpression env e)])
+          | Pstringrefs, [es; en] ->
+              let exps = cast (C_Pointer C_Char) (lambda_to_texpression env es) in
+              let expn = cast (C_Int) (lambda_to_texpression env en) in
+              C_Char, C_ArrayIndex (exps, Some expn)
           | _ -> failwith ("lambda_to_expression Lprim " ^ (Printlambda.name_of_primitive prim))
         end
     | Lconst sc -> structured_constant_to_texpression env sc
@@ -846,8 +850,12 @@ let compile_implementation modulename lambda =
         let (accum', e') = fixup_expression accum e in accum', C_Blob (s1,e',s2)
     | C_Field (e,f) ->
         let (accum', e') = fixup_expression accum e in accum', C_Field (e',f)
-    | C_ArrayIndex (e,i) ->
-        let (accum', e') = fixup_expression accum e in accum', C_ArrayIndex (e',i)
+    | C_ArrayIndex (e, None) ->
+        let (accum', e') = fixup_expression accum e in accum', C_ArrayIndex (e', None)
+    | C_ArrayIndex (e, Some i) ->
+        let (accum', e') = fixup_expression accum e in
+        let (accum'', i') = fixup_expression accum' i in
+        accum'', C_ArrayIndex (e', Some i')
     | C_Cast (ty,e) ->
         let (accum', e') = fixup_expression accum e in accum', C_Cast (ty,e')
     | C_UnaryOp (op,e) ->
