@@ -526,7 +526,7 @@ and tclosurify id fv_mapping ret_type typedparams cbody =
   let closure_ctype = (C_FunPointer (ret_type, List.map fst typedparams)) in
 
   VarLibrary.set_ctype (C_FunPointer (ret_type, List.map fst typedparams_fun)) id_fun;
-  VarLibrary.set_ctype C_Boxed id;
+  VarLibrary.set_ctype closure_ctype id;
 
   let closure =
     C_FunCall (C_GlobalVariable "ocaml_liballocs_close",
@@ -721,16 +721,17 @@ and lambda_to_texpression env lam : C.texpression =
       then C_FunPointer (C_Boxed, [C_Boxed; C_VarArgs])
       else ctype
     in
-    let ret_ctype, arg_ctypes =
+    let ret_ctype, arg_ctypes, apfunc_actual_ctype =
       match apfunc_actual_ctype with
       | C_FunPointer (x, a) when vararg ->
-          x, List.map (fun _ -> C_Boxed) ap_args
+          x, List.map (fun _ -> C_Boxed) ap_args, apfunc_actual_ctype
       | C_FunPointer (x, a) when not vararg ->
-          x, a
+          x, a, apfunc_actual_ctype
       | C_Boxed ->
           (* calling a boxed function pointer -- have to guess... *)
           (* for instance (field 0 (global List!)) *)
-          C_Boxed, List.map (fun _ -> C_Boxed) ap_args
+          let arg_ctypes = List.map (fun _ -> C_Boxed) ap_args in
+          C_Boxed, arg_ctypes, C_FunPointer (C_Boxed, arg_ctypes)
       | _ -> failwith "Lapply on non-function expression?"
     in
     let cargs =
@@ -885,48 +886,46 @@ end
 
 module Fixup = struct
 
-let deinlined_funs = ref [] (* TODO: one day we want them to be attached near their users *)
-
-let rec fixup_expression accum e = (* sticks inlined statements on the front of accum *)
+let rec fixup_expression defun accum e = (* sticks inlined statements on the front of accum *)
   match e with
   | C_InlineRevStatements (_, []) -> failwith "fixup_expression: invalid inlinerevstatements (empty)"
   | C_InlineRevStatements (_ctype, C_Expression e::sl) -> (* avoid creating a deinlined variable if we already have the expression *)
       (* NB: order matters! *)
-      let sl' = fixup_rev_statements accum sl in
-      let (sl'', e') = fixup_expression sl' e in
+      let sl' = fixup_rev_statements defun accum sl in
+      let (sl'', e') = fixup_expression defun sl' e in
       sl'', e'
   | C_InlineRevStatements (ctype, sl) ->
       let id = Ident.create "__deinlined" in
-      let sl' = fixup_rev_statements ((C_VarDeclare (ctype, C_Variable id, None))::accum) sl in
+      let sl' = fixup_rev_statements defun ((C_VarDeclare (ctype, C_Variable id, None))::accum) sl in
       let sl'' = assign_last_value_of_statement (ctype,id) (ctype,sl') in
       sl'', C_Variable id
   | C_InlineFunDefn (retty, name, args, sl) ->
-      let sl' = fixup_rev_statements [] sl in
-      deinlined_funs := (C_FunDefn (retty, name, args, Some sl')) :: !deinlined_funs;
+      let sl' = fixup_rev_statements defun [] sl in
+      defun := (C_FunDefn (retty, name, args, Some sl')) :: !defun;
       accum, name
   | C_IntLiteral _ | C_FloatLiteral _ | C_PointerLiteral _ | C_StringLiteral _ | C_CharLiteral _
   | C_Variable _ | C_GlobalVariable _ | C_Allocate _ -> accum, e
   | C_Blob (s1,e,s2) ->
-      let (accum', e') = fixup_expression accum e in accum', C_Blob (s1,e',s2)
+      let (accum', e') = fixup_expression defun accum e in accum', C_Blob (s1,e',s2)
   | C_Field (e,f) ->
-      let (accum', e') = fixup_expression accum e in accum', C_Field (e',f)
+      let (accum', e') = fixup_expression defun accum e in accum', C_Field (e',f)
   | C_ArrayIndex (e, i) ->
-      let (accum', e') = fixup_expression accum e in
-      let (accum'', i') = fixup_expression accum' i in
+      let (accum', e') = fixup_expression defun accum e in
+      let (accum'', i') = fixup_expression defun accum' i in
       accum'', C_ArrayIndex (e', i')
   | C_Cast (ty,e) ->
-      let (accum', e') = fixup_expression accum e in accum', C_Cast (ty,e')
+      let (accum', e') = fixup_expression defun accum e in accum', C_Cast (ty,e')
   | C_UnaryOp (op,e) ->
-      let (accum', e') = fixup_expression accum e in accum', C_UnaryOp (op,e')
+      let (accum', e') = fixup_expression defun accum e in accum', C_UnaryOp (op,e')
   | C_BinaryOp (op,e1,e2) ->
-      let (accum', e1') = fixup_expression accum e1 in
-      let (accum'', e2') = fixup_expression accum' e2 in
+      let (accum', e1') = fixup_expression defun accum e1 in
+      let (accum'', e2') = fixup_expression defun accum' e2 in
       accum'', C_BinaryOp (op,e1',e2')
   | C_InitialiserList es ->
       let rec loop accum es' = function
         | [] -> accum, List.rev es'
         | e::es ->
-            let (accum', e') = fixup_expression accum e in
+            let (accum', e') = fixup_expression defun accum e in
             loop accum' (e'::es') es
       in
       let (accum', es') = loop accum [] es in
@@ -935,34 +934,31 @@ let rec fixup_expression accum e = (* sticks inlined statements on the front of 
       let rec loop accum es' = function
         | [] -> accum, List.rev es'
         | e::es ->
-            let (accum', e') = fixup_expression accum e in
+            let (accum', e') = fixup_expression defun accum e in
             loop accum' (e'::es') es
       in
       let (accum', es') = loop accum [] es in
       accum', C_FunCall (id,es')
 
-and fixup_rev_statements accum sl = (* sticks fixed up sl on the front of accum *)
+and fixup_rev_statements defun accum sl = (* sticks fixed up sl on the front of accum *)
   let rec loop_start accum xs = loop accum (List.rev xs)
   and loop accum = function
     | [] -> accum
     | s::statements ->
       let accum'' =
         match s with
-        | C_Expression e -> let (accum', e') = fixup_expression accum e in (C_Expression e') :: accum'
+        | C_Expression e -> let (accum', e') = fixup_expression defun accum e in (C_Expression e') :: accum'
         | C_VarDeclare (ty,eid,None) -> C_VarDeclare (ty,eid,None) :: accum
-        | C_VarDeclare (ty,eid,Some e) -> let (accum', e') = fixup_expression accum e in C_VarDeclare (ty,eid,Some e') :: accum'
-        | C_Assign (eid,e) -> let (accum', e') = fixup_expression accum e in C_Assign (eid,e') :: accum'
-        | C_If (e,slt,slf) -> let (accum', e') = fixup_expression accum e in (C_If (e', loop_start [] slt, loop_start [] slf)) :: accum'
-        | C_Return (Some e) -> let (accum', e') = fixup_expression accum e in (C_Return (Some e')) :: accum'
+        | C_VarDeclare (ty,eid,Some e) -> let (accum', e') = fixup_expression defun accum e in C_VarDeclare (ty,eid,Some e') :: accum'
+        | C_Assign (eid,e) -> let (accum', e') = fixup_expression defun accum e in C_Assign (eid,e') :: accum'
+        | C_If (e,slt,slf) -> let (accum', e') = fixup_expression defun accum e in (C_If (e', loop_start [] slt, loop_start [] slf)) :: accum'
+        | C_Return (Some e) -> let (accum', e') = fixup_expression defun accum e in (C_Return (Some e')) :: accum'
         | C_Return (None) | C_LabelDecl _ | C_LabelGoto _ ->
             s :: accum
       in
       loop accum'' statements
   in
   loop_start accum sl
-
-let reset () =
-  deinlined_funs := []
 
 end
 
@@ -971,7 +967,6 @@ let compile_implementation modulename lambda =
   let () = TypeLibrary.reset () in
   let () = VarLibrary.reset () in
   let () = Translate.reset () in
-  let () = Fixup.reset () in
 
   let module_export_var = C_GlobalVariable modulename in (* no need to add export var to VarLibrary *)
   let module_constructor_sl =
@@ -980,7 +975,8 @@ let compile_implementation modulename lambda =
       Translate.lambda_to_module_constructor_sl id Env.empty lam
     | lam -> failwith ("compile_implementation unexpected root: " ^ (formats Printlambda.lambda lam))
   in
-  let fixed_module_constructor_sl = Fixup.fixup_rev_statements [] module_constructor_sl in
+  let module_constructor_deinlined_fns = ref [] in
+  let fixed_module_constructor_sl = Fixup.fixup_rev_statements module_constructor_deinlined_fns [] module_constructor_sl in
   let the_module_constructor =
     C_FunDefn (C_Void, C_GlobalVariable (module_initialiser_name modulename), [], Some [
       C_If (C_GlobalVariable modulename,
@@ -989,7 +985,18 @@ let compile_implementation modulename lambda =
     ])
   in
 
-  let fixed_toplevels = List.rev_map (map_toplevel (Fixup.fixup_rev_statements [])) !Translate.toplevels in
+  let fixed_toplevels =
+    List.fold_left (fun accum toplevel ->
+      let deinlined_funs = ref [] in
+      let fixed_toplevel =
+        map_toplevel (fun sl ->
+          let fixed_sl = Fixup.fixup_rev_statements deinlined_funs [] sl in
+          fixed_sl
+        ) toplevel
+      in
+      !deinlined_funs @ fixed_toplevel :: accum
+    ) [] (List.rev !Translate.toplevels)
+  in
 
   (* NB: should be evaluated last when we know all types *)
   let global_typedecls =
@@ -999,5 +1006,4 @@ let compile_implementation modulename lambda =
   [C_TopLevelComment "global typedecls:"] @ global_typedecls @
   [C_TopLevelComment "extern decls:"] @ !Translate.extern_decls @
   [C_TopLevelComment "toplevels:"] @ fixed_toplevels @
-  [C_TopLevelComment "deinlined functions:"] @ !Fixup.deinlined_funs @
-  [ C_TopLevelComment "the module constructor:" ; the_module_constructor]
+  [C_TopLevelComment "the module constructor:"] @ !module_constructor_deinlined_fns @ [the_module_constructor]
