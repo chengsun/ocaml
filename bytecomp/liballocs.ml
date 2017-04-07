@@ -404,7 +404,6 @@ end
 
 
 (* the VarLibrary keeps track of known ctypes for each variable *)
-(* Globals only for now *)
 module VarLibrary = struct
   module VarHash = Hashtbl.Make(struct
     include Ident
