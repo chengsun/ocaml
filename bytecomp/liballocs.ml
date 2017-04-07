@@ -987,7 +987,7 @@ let compile_implementation modulename lambda =
 
   let fixed_toplevels =
     List.fold_left (fun accum toplevel ->
-      let rev_deinlined_funs = ref [] in (* this is reversed *)
+      let rev_deinlined_funs = ref [] in
       let fixed_toplevel =
         map_toplevel (fun sl ->
           let fixed_sl = Fixup.fixup_rev_statements rev_deinlined_funs [] sl in
