@@ -348,8 +348,10 @@ module TypeLibrary = struct
   type t = ctype
 
   module TypeHash = Hashtbl.Make(Types.TypeOps)
-  (* TODO: store separate list in dependency order *)
+  (* stores the mapping from type_expr to C types *)
   let g_table: t TypeHash.t = TypeHash.create 16
+  (* stores the C types in reverse "seen" order -- for correctly-ordered output print this list in reverse *)
+  let g_order: t list ref = ref []
 
   let rec tfield_to_list type_expr =
     match type_expr.desc with
@@ -364,6 +366,7 @@ module TypeLibrary = struct
         ocaml_to_c_type fieldtype, fieldname) ts))
     in
     TypeHash.add g_table type_expr ctype;
+    g_order := ctype :: !g_order;
     ctype
 
   and add_mapping type_expr =
@@ -397,12 +400,12 @@ module TypeLibrary = struct
 
 
   (* get all struct declarations so far *)
-  (* TODO: read from separate list in dependency order *)
   let dump_all_types_for_definition () =
-    TypeHash.fold (fun _k v acc -> v::acc) g_table []
+    List.rev !g_order
 
   let reset () =
-    TypeHash.clear g_table
+    TypeHash.clear g_table;
+    g_order := []
 end
 
 
