@@ -488,15 +488,19 @@ let rec let_to_rev_statements env id lam =
       IdentSet.elements (free_variables (Lletrec([id, lam], lambda_unit))) in
 
     if fv = [] then begin
+      (* plain function *)
       VarLibrary.set_ctype (C_FunPointer (ret_type, List.map fst typedparams)) id;
       [C_Expression (C_InlineFunDefn (ret_type, C_Variable id, typedparams, cbody))]
+
     end else begin
+      (* closure required *)
       let fv_mapping = List.map (fun v -> (v, (VarLibrary.ctype v, C_Variable v))) fv in
       let id_fun = Ident.create ("__closure__" ^ (Ident.name id)) in
       let cty, closure = tclosurify id_fun fv_mapping ret_type typedparams cbody in
       VarLibrary.set_ctype cty id;
       [C_VarDeclare (cty, C_Variable id, Some closure)]
     end
+
   | _ ->
     let ctype, defn = lambda_to_texpression env lam in
     VarLibrary.set_ctype ctype id;
