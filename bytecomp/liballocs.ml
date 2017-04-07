@@ -245,17 +245,6 @@ module Emitcode = struct
     | C_Struct (id, fields) -> cstruct_defn_string id fields
     | _ -> failwith "unexpected attempt to define non-struct ctype"
 
-  let string_split_on_char sep s =
-    let r = ref [] in
-    let j = ref (String.length s) in
-    for i = String.length s - 1 downto 0 do
-      if String.unsafe_get s i = sep then begin
-        r := String.sub s (i + 1) (!j - i - 1) :: !r;
-        j := i
-      end
-    done;
-    String.sub s 0 !j :: !r
-
   (* prints a ctype with identifier. this is usually the ctype followed by the identifier, except funpointers are funky *)
   let rec ctype_and_identifier_to_string cty id =
     match cty with
