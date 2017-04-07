@@ -549,8 +549,8 @@ and lambda_to_texpression env lam : C.texpression =
       lambda_to_texpression (Envaux.env_from_summary ev.lev_env Subst.identity) body
   | Lprim (prim, largs) ->
     begin
-      let bop expected_type op e1 e2 =
-        expected_type,
+      let bop expected_type output_type op e1 e2 =
+        output_type,
         C_BinaryOp (op,
                     cast expected_type (lambda_to_texpression env e1),
                     cast expected_type (lambda_to_texpression env e2))
@@ -560,8 +560,9 @@ and lambda_to_texpression env lam : C.texpression =
         C_UnaryOp (op,
                    cast expected_type (lambda_to_texpression env e))
       in
-      let bool_bop = bop C_Bool in
-      let int_bop = bop C_Int in
+      let bool_bop = bop C_Bool C_Bool in
+      let int_bop = bop C_Int C_Int in
+      let intcmp_bop = bop C_Int C_Bool in
       let int_uop = uop C_Int in
       match prim, largs with
       | Pidentity, [x] -> (* why does Pidentity occur? e.g. in Pervasives *)
@@ -635,14 +636,14 @@ and lambda_to_texpression env lam : C.texpression =
       | Porint, [e1;e2] -> int_bop "|" e1 e2
       | Pxorint, [e1;e2] -> int_bop "^" e1 e2
       | Plslint, [e1;e2] -> int_bop "<<" e1 e2
-      | Plsrint, [e1;e2] -> bop C_UInt ">>" e1 e2
+      | Plsrint, [e1;e2] -> bop C_UInt C_UInt ">>" e1 e2
       | Pnegint, [e] -> int_uop "-" e
-      | Pintcomp(Ceq), [e1;e2] -> int_bop "==" e1 e2
-      | Pintcomp(Cneq), [e1;e2] -> int_bop "!=" e1 e2
-      | Pintcomp(Clt), [e1;e2] -> int_bop "<" e1 e2
-      | Pintcomp(Cle), [e1;e2] -> int_bop "<=" e1 e2
-      | Pintcomp(Cgt), [e1;e2] -> int_bop ">" e1 e2
-      | Pintcomp(Cge), [e1;e2] -> int_bop ">=" e1 e2
+      | Pintcomp(Ceq), [e1;e2] -> intcmp_bop "==" e1 e2
+      | Pintcomp(Cneq), [e1;e2] -> intcmp_bop "!=" e1 e2
+      | Pintcomp(Clt), [e1;e2] -> intcmp_bop "<" e1 e2
+      | Pintcomp(Cle), [e1;e2] -> intcmp_bop "<=" e1 e2
+      | Pintcomp(Cgt), [e1;e2] -> intcmp_bop ">" e1 e2
+      | Pintcomp(Cge), [e1;e2] -> intcmp_bop ">=" e1 e2
       | Pccall {prim_name; prim_arity}, lam ->
           assert (List.length lam = prim_arity);
           let args =
