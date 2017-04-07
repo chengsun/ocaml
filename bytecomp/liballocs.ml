@@ -995,7 +995,7 @@ let compile_implementation modulename lambda =
         ) toplevel
       in
       (* NB: we're folding over a reversed source list, so accum ends up the right way round *)
-      (List.rev !rev_deinlined_funs) @ fixed_toplevel :: accum
+      List.rev_append !rev_deinlined_funs (fixed_toplevel :: accum)
     ) [] !Translate.rev_toplevels
   in
 
