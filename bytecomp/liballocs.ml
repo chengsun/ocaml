@@ -57,7 +57,7 @@ module C = struct
     | C_Bool -> "bool"
     | C_Char -> "char"
     | C_Struct (id, _) -> "struct " ^ (Ident.unique_name id)
-    | C_FunPointer (tyret, tyargs) -> Printf.sprintf "%s(*)(%s)" (ctype_to_string tyret) (map_intersperse_concat ctype_to_string "," tyargs)
+    | C_FunPointer (tyret, tyargs) -> Printf.sprintf "%s((*)(%s))" (ctype_to_string tyret) (map_intersperse_concat ctype_to_string "," tyargs)
     | C_VarArgs -> "..."
     | C_WhateverType -> "/*UNDERSPECIFIED TYPE!*/"
 
@@ -256,13 +256,19 @@ module Emitcode = struct
     done;
     String.sub s 0 !j :: !r
 
-  let rec expression_to_string = function
+  (* prints a ctype with identifier. this is usually the ctype followed by the identifier, except funpointers are funky *)
+  let rec ctype_and_identifier_to_string cty id =
+    match cty with
+    | C_FunPointer (tyret, tyargs) -> Printf.sprintf "%s((*%s)(%s))" (ctype_to_string tyret) (expression_to_string id) (map_intersperse_concat ctype_to_string "," tyargs)
+    | _ -> Printf.sprintf "%s %s" (ctype_to_string cty) (expression_to_string id)
+
+  and expression_to_string = function
     | C_Blob (s1, e, s2) -> Printf.sprintf "%s%s%s" s1 (expression_to_string e) s2
     | C_InlineRevStatements (cty, sl) -> Printf.sprintf "/*FIXME:inline %s*/{\n%s\n}" (ctype_to_string cty) (rev_statements_to_string sl)
     | C_InlineFunDefn (retty, name, args, sl) -> Printf.sprintf "/*FIXME:inline fun %s %s (%s)*/{\n%s\n}"
                               (ctype_to_string retty)
                               (expression_to_string name)
-                              (map_intersperse_concat (fun (t,id) -> (ctype_to_string t) ^ " " ^ (Ident.unique_name id)) ", " args)
+                              (map_intersperse_concat (fun (t,id) -> (ctype_and_identifier_to_string t (C_Variable id))) ", " args)
                               (rev_statements_to_string sl)
     | C_IntLiteral i -> Int64.to_string i
     | C_FloatLiteral f -> f
@@ -291,7 +297,7 @@ module Emitcode = struct
   and statement_to_string = function
     | C_Expression e -> (expression_to_string e) ^ ";"
     | C_VarDeclare (t,eid,e_option) ->
-        (ctype_to_string t) ^ " " ^ (expression_to_string eid) ^
+        (ctype_and_identifier_to_string t eid) ^
         (match e_option with
          | None -> ""
          | Some e -> " = " ^ (expression_to_string e)
@@ -312,15 +318,15 @@ module Emitcode = struct
     | C_TopLevelComment str -> "/*\n" ^ str ^ "\n*/"
     | C_TypeDefn t -> ctype_defn_string t
     | C_GlobalDefn (t,id,e_option) ->
-        (ctype_to_string t) ^ " " ^ (expression_to_string id) ^
+        (ctype_and_identifier_to_string t id) ^
         (match e_option with
          | None -> ""
          | Some e -> " = " ^ (expression_to_string e)
         ) ^ ";"
     | C_ExternDecl (t,id) ->
-        Printf.sprintf "extern %s %s;" (ctype_to_string t) (expression_to_string id)
+        Printf.sprintf "extern %s;" (ctype_and_identifier_to_string t id)
     | C_FunDefn (t,id,args,xs_option) ->
-        (ctype_to_string t) ^ " " ^ (expression_to_string id) ^ "(" ^
+        (ctype_and_identifier_to_string t id) ^ "(" ^
         (map_intersperse_concat (fun (t,id) -> (ctype_to_string t) ^ " " ^ (Ident.unique_name id)) ", " args) ^ ")" ^
         ( match xs_option with
           | None -> ";"
@@ -491,58 +497,62 @@ let rec let_to_rev_statements env id lam =
     let ret_type, typedparams, cbody = let_to_function_parts env params body in
     let fv =
       IdentSet.elements (free_variables (Lletrec([id, lam], lambda_unit))) in
-    let n_args = List.length params in
-
 
     if fv = [] then begin
       VarLibrary.set_ctype (C_FunPointer (ret_type, List.map fst typedparams)) id;
       [C_Expression (C_InlineFunDefn (ret_type, C_Variable id, typedparams, cbody))]
     end else begin
-      let id_fun = Ident.create ("__closure__" ^ (Ident.name id)) in
-      let env_id = Ident.create "env" in (* TODO dont make this if not used *)
-
-      let typedparam_env = C_Pointer C_Boxed, env_id in
-      let typedparams_fun =
-        typedparams @ (if n_args <= 5 then [typedparam_env] else [C_Pointer C_Void, Ident.create "unused" ; typedparam_env])
-      in
-
-      let mapping = List.mapi (fun i v -> (i,v)) fv in
-      let env_elt i = C_ArrayIndex (C_Variable env_id, C_IntLiteral (Int64.of_int i)) in
-
-      let env_sl = [C_VarDeclare (C_Pointer C_Boxed, C_Variable env_id, Some (C_Allocate (C_Boxed, List.length mapping, Error "let_to_rev_statements environment")))] in let env_sl = List.fold_left (fun sl (i,v) ->
-        C_Assign (env_elt i, C_Variable v) :: sl
-      ) env_sl mapping in
-
-      let unenv_sl = List.fold_left (fun sl (i,v) ->
-        C_VarDeclare (VarLibrary.ctype v, C_Variable v, Some (env_elt i)) :: sl
-      ) [] mapping in
-
-      let closure_ctype = (C_FunPointer (ret_type, List.map fst typedparams)) in
-
-      VarLibrary.set_ctype (C_FunPointer (ret_type, List.map fst typedparams_fun)) id_fun;
-      VarLibrary.set_ctype C_Boxed id;
-
-      let closure =
-        C_FunCall (C_GlobalVariable "ocaml_liballocs_close",
-          [ C_InlineFunDefn
-            ( ret_type
-            , C_Variable id_fun
-            , typedparams_fun
-            , cbody @ unenv_sl
-            )
-          ; C_IntLiteral (Int64.of_int n_args)
-          ; C_Variable env_id
-          ]
-        )
-      in
-
-      C_VarDeclare (C_Boxed, C_Variable id, Some (cast C_Boxed (closure_ctype, closure))) :: env_sl
+      let fv_mapping = List.map (fun v -> (v, (VarLibrary.ctype v, C_Variable v))) fv in
+      let cty, closure = tclosurify id fv_mapping ret_type typedparams cbody in
+      [C_VarDeclare (cty, C_Variable id, Some closure)]
     end
   | _ ->
     let ctype, defn = lambda_to_texpression env lam in
     VarLibrary.set_ctype ctype id;
     [C_VarDeclare (ctype, C_Variable id, Some (defn))]
 
+and tclosurify id fv_mapping ret_type typedparams cbody =
+  let id_fun = Ident.create ("__closure__" ^ (Ident.name id)) in
+  let env_id = Ident.create "env" in (* TODO dont make this if not used *)
+
+  let n_args = List.length typedparams in
+
+  let typedparam_env = C_Pointer C_Boxed, env_id in
+  let typedparams_fun =
+    typedparams @ (if n_args <= 5 then [typedparam_env] else [C_Pointer C_Void, Ident.create "unused" ; typedparam_env])
+  in
+
+  let fv_mapping = List.mapi (fun i (fv_id,fv_tvalue) -> (i, (fv_id,fv_tvalue))) fv_mapping in
+  let env_elt i = C_ArrayIndex (C_Variable env_id, C_IntLiteral (Int64.of_int i)) in
+
+  let env_sl = [C_VarDeclare (C_Pointer C_Boxed, C_Variable env_id, Some (C_Allocate (C_Boxed, List.length fv_mapping, Error "let_to_rev_statements environment")))] in
+  let env_sl = List.fold_left (fun sl (i, (_fv_id, fv_tvalue)) ->
+    C_Assign (env_elt i, snd fv_tvalue) :: sl
+  ) env_sl fv_mapping in
+
+  let unenv_sl = List.fold_left (fun sl (i, (fv_id, fv_tvalue)) ->
+    C_VarDeclare (fst fv_tvalue, C_Variable fv_id, Some (env_elt i)) :: sl
+  ) [] fv_mapping in
+
+  let closure_ctype = (C_FunPointer (ret_type, List.map fst typedparams)) in
+
+  VarLibrary.set_ctype (C_FunPointer (ret_type, List.map fst typedparams_fun)) id_fun;
+  VarLibrary.set_ctype C_Boxed id;
+
+  let closure =
+    C_FunCall (C_GlobalVariable "ocaml_liballocs_close",
+      [ C_InlineFunDefn
+        ( ret_type
+        , C_Variable id_fun
+        , typedparams_fun
+        , cbody @ unenv_sl
+        )
+      ; C_IntLiteral (Int64.of_int n_args)
+      ; C_Variable env_id
+      ]
+    )
+  in
+  closure_ctype, C_InlineRevStatements (closure_ctype, C_Expression (closure) :: env_sl)
 
 (* translate a function let-binding into (ret_type, typedparams, cbody) *)
 and let_to_function_parts env params body =
