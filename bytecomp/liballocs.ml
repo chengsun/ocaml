@@ -413,15 +413,13 @@ module VarLibrary = struct
   let g_table: ctype VarHash.t = VarHash.create 16
 
   let ctype id =
-    Printf.printf "getting type of %s... " (Ident.unique_name id);
     let the_ctype =
       try VarHash.find g_table id
       with Not_found -> (
-        Printf.printf "\n<<<<<<<<<<<<<<<<<<<<WARNING>>>>>>>>>>>>>>>>>>>>\ntype not found. substituting with ocaml_value_t\n<<<<<<<<<<<<<<<<<<<<WARNING>>>>>>>>>>>>>>>>>>>>\n ... ";
+        Printf.printf "\n<<<<<<<<<<<<<<<<<<<<WARNING>>>>>>>>>>>>>>>>>>>>\ntype of %s not found. substituting with ocaml_value_t\n<<<<<<<<<<<<<<<<<<<<WARNING>>>>>>>>>>>>>>>>>>>>\n ... " (Ident.unique_name id);
         C_Boxed
       )
     in
-    Printf.printf "%s\n" (ctype_to_string the_ctype);
     the_ctype
 
 
