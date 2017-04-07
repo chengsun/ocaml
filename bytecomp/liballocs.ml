@@ -783,10 +783,10 @@ and lambda_to_trev_statements env lam =
 
 (* The reason toplevels are handled separately is because we want each toplevel let-binding to be transformed into a *global*,
  * so that they are subsequently accessible throughout. *)
-let rec let_args_to_module_constructor_sl env id lam =
+let rec let_to_module_constructor_sl env id lam =
   match lam with
   | Levent (body, ev) ->
-      let_args_to_module_constructor_sl (Envaux.env_from_summary ev.lev_env Subst.identity) id body
+      let_to_module_constructor_sl (Envaux.env_from_summary ev.lev_env Subst.identity) id body
   | Lfunction { params ; body } ->
       Printf.printf "Got a fun LET %s\n%!" (Ident.unique_name id);
       let ret_type, typedparams, cbody = let_to_function_parts env params body in
@@ -811,13 +811,13 @@ let rec lambda_to_module_constructor_sl module_id env lam =
   | Llet (_strict, id, args, body) ->
       Printf.printf "Got a LET %s\n%!" (Ident.unique_name id);
       (* evaluation order important for type propagation *)
-      let a = let_args_to_module_constructor_sl env id args in
+      let a = let_to_module_constructor_sl env id args in
       let b = lambda_to_module_constructor_sl module_id env body in
       b @ a
   | Lletrec ([id, args], body) ->
       Printf.printf "Got a LETREC %s\n%!" (Ident.unique_name id);
       (* evaluation order important for type propagation *)
-      let a = let_args_to_module_constructor_sl env id args in
+      let a = let_to_module_constructor_sl env id args in
       let b = lambda_to_module_constructor_sl module_id env body in
       b @ a
   | Lsequence (l1, l2) -> (* let () = l1;; l2 *)
