@@ -480,28 +480,39 @@ let rec let_to_rev_statements env id lam =
     let_to_rev_statements (Envaux.env_from_summary ev.lev_env Subst.identity) id body
   | Lfunction { params ; body } ->
     Printf.printf "Got a expression fun LET %s\n%!" (Ident.unique_name id);
-    let ret_type, typedparams, cbody = let_to_function_parts env params body in
-    let fv =
-      IdentSet.elements (free_variables (Lletrec([id, lam], lambda_unit))) in
 
-    if fv = [] then begin
-      (* plain function *)
-      VarLibrary.set_ctype (C_FunPointer (ret_type, List.map fst typedparams)) id;
-      [C_Expression (C_InlineFunDefn (ret_type, C_Variable id, typedparams, cbody))]
-
+    let (cty, expr), globally_accessible = lfunction_to_texpression env lam id params body in
+    if globally_accessible then begin
+      [C_Expression expr]
     end else begin
-      (* closure required *)
-      let fv_mapping = List.map (fun v -> (v, (VarLibrary.ctype v, C_Variable v))) fv in
-      let id_fun = Ident.create ("__closure__" ^ (Ident.name id)) in
-      let cty, closure = tclosurify id_fun fv_mapping ret_type typedparams cbody in
       VarLibrary.set_ctype cty id;
-      [C_VarDeclare (cty, C_Variable id, Some closure)]
+      [C_VarDeclare (cty, C_Variable id, Some expr)]
     end
 
   | _ ->
     let ctype, defn = lambda_to_texpression env lam in
     VarLibrary.set_ctype ctype id;
     [C_VarDeclare (ctype, C_Variable id, Some defn)]
+
+(* returns (cty, expr), globally_accessible
+ * where globally_accessible=true means no variable should be defined to bind the resulting expression as the function is globally accessible *)
+and lfunction_to_texpression env lam id params body =
+  let ret_type, typedparams, cbody = let_to_function_parts env params body in
+  let fv = IdentSet.elements (free_variables (Lletrec([id, lam], lambda_unit))) in
+
+  if fv = [] then begin
+    (* plain function *)
+    let cty = C_FunPointer (ret_type, List.map fst typedparams) in
+    VarLibrary.set_ctype cty id;
+    (cty, C_InlineFunDefn (ret_type, C_Variable id, typedparams, cbody)), true
+
+  end else begin
+    (* closure required *)
+    let fv_mapping = List.map (fun v -> (v, (VarLibrary.ctype v, C_Variable v))) fv in
+    let id_fun = Ident.create ("__closure__" ^ (Ident.name id)) in
+    let cty, closure = tclosurify id_fun fv_mapping ret_type typedparams cbody in
+    (cty, closure), false
+  end
 
 (* build a closure out of a base function's parts.
  * [id_fun] specifies the ID of a newly-defined base function (which should not be used/referenced elsewhere).
@@ -524,7 +535,7 @@ and tclosurify id_fun env_mapping ret_type typedparams cbody =
     [ C_VarDeclare (
       C_Pointer C_Boxed,
       C_Variable env_id,
-      Some (C_Allocate (C_Boxed, List.length env_mapping, Error "let_to_rev_statements environment"))
+      Some (C_Allocate (C_Boxed, List.length env_mapping, Error "tclosurify environment"))
     )]
   in
   let env_sl = List.fold_left (fun sl (i, (_fv_id, fv_tvalue)) ->
@@ -719,6 +730,12 @@ and lambda_to_texpression env lam : C.texpression =
     end
   | Lconst sc -> structured_constant_to_texpression env sc
   | Lvar id -> VarLibrary.ctype id, C_Variable id
+  | Lfunction { params ; body } ->
+    let id = Ident.create "__lambda" in
+
+    Printf.printf "Got a lambda fun LET %s\n%!" (Ident.unique_name id);
+    let (cty, ex), _ = lfunction_to_texpression env lam id params body in
+    cty, ex
   | Lapply { ap_func = e_id ; ap_args } ->
     let vararg =
       (* FIXME: hardcoded for printf *)
@@ -765,7 +782,7 @@ and lambda_to_trev_statements env lam =
   match lam with
   | Levent (body, ev) ->
       lambda_to_trev_statements (Envaux.env_from_summary ev.lev_env Subst.identity) body
-  | Lvar _ | Lconst _ | Lprim _ | Lapply _ ->
+  | Lvar _ | Lconst _ | Lprim _ | Lapply _ | Lfunction _ ->
       let ctype, cexpr = lambda_to_texpression env lam in
       ctype, [C_Expression cexpr]
   | Llet (_strict, id, args, body) ->
