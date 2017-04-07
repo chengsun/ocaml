@@ -516,11 +516,11 @@ and tclosurify id fv_mapping ret_type typedparams cbody =
 
   let env_sl = [C_VarDeclare (C_Pointer C_Boxed, C_Variable env_id, Some (C_Allocate (C_Boxed, List.length fv_mapping, Error "let_to_rev_statements environment")))] in
   let env_sl = List.fold_left (fun sl (i, (_fv_id, fv_tvalue)) ->
-    C_Assign (env_elt i, snd fv_tvalue) :: sl
+    C_Assign (env_elt i, cast C_Boxed fv_tvalue) :: sl
   ) env_sl fv_mapping in
 
-  let unenv_sl = List.fold_left (fun sl (i, (fv_id, fv_tvalue)) ->
-    C_VarDeclare (fst fv_tvalue, C_Variable fv_id, Some (env_elt i)) :: sl
+  let unenv_sl = List.fold_left (fun sl (i, (fv_id, (fv_ty, _))) ->
+    C_VarDeclare (fv_ty, C_Variable fv_id, Some (cast fv_ty (C_Boxed, env_elt i))) :: sl
   ) [] fv_mapping in
 
   let closure_ctype = (C_FunPointer (ret_type, List.map fst typedparams)) in
