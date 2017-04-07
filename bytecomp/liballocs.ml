@@ -492,16 +492,21 @@ let rec let_to_rev_statements env id lam =
       [C_Expression (C_InlineFunDefn (ret_type, C_Variable id, typedparams, cbody))]
     end else begin
       let fv_mapping = List.map (fun v -> (v, (VarLibrary.ctype v, C_Variable v))) fv in
-      let cty, closure = tclosurify id fv_mapping ret_type typedparams cbody in
+      let id_fun = Ident.create ("__closure__" ^ (Ident.name id)) in
+      let cty, closure = tclosurify id_fun fv_mapping ret_type typedparams cbody in
+      VarLibrary.set_ctype cty id;
       [C_VarDeclare (cty, C_Variable id, Some closure)]
     end
   | _ ->
     let ctype, defn = lambda_to_texpression env lam in
     VarLibrary.set_ctype ctype id;
-    [C_VarDeclare (ctype, C_Variable id, Some (defn))]
+    [C_VarDeclare (ctype, C_Variable id, Some defn)]
 
-and tclosurify id fv_mapping ret_type typedparams cbody =
-  let id_fun = Ident.create ("__closure__" ^ (Ident.name id)) in
+(* build a closure out of a base function's parts.
+ * [id_fun] specifies the ID of a newly-defined base function (which should not be used/referenced elsewhere).
+ * [env_mapping] specifies a mapping of (Ident.t * texpression) which represent variables in the environment, which cbody will have access to.
+ * *)
+and tclosurify id_fun env_mapping ret_type typedparams cbody =
   let env_id = Ident.create "env" in (* TODO dont make this if not used *)
 
   let n_args = List.length typedparams in
@@ -511,22 +516,21 @@ and tclosurify id fv_mapping ret_type typedparams cbody =
     typedparams @ (if n_args <= 5 then [typedparam_env] else [C_Pointer C_Void, Ident.create "unused" ; typedparam_env])
   in
 
-  let fv_mapping = List.mapi (fun i (fv_id,fv_tvalue) -> (i, (fv_id,fv_tvalue))) fv_mapping in
+  let env_mapping = List.mapi (fun i (fv_id,fv_tvalue) -> (i, (fv_id,fv_tvalue))) env_mapping in
   let env_elt i = C_ArrayIndex (C_Variable env_id, C_IntLiteral (Int64.of_int i)) in
 
-  let env_sl = [C_VarDeclare (C_Pointer C_Boxed, C_Variable env_id, Some (C_Allocate (C_Boxed, List.length fv_mapping, Error "let_to_rev_statements environment")))] in
+  let env_sl = [C_VarDeclare (C_Pointer C_Boxed, C_Variable env_id, Some (C_Allocate (C_Boxed, List.length env_mapping, Error "let_to_rev_statements environment")))] in
   let env_sl = List.fold_left (fun sl (i, (_fv_id, fv_tvalue)) ->
     C_Assign (env_elt i, cast C_Boxed fv_tvalue) :: sl
-  ) env_sl fv_mapping in
+  ) env_sl env_mapping in
 
   let unenv_sl = List.fold_left (fun sl (i, (fv_id, (fv_ty, _))) ->
     C_VarDeclare (fv_ty, C_Variable fv_id, Some (cast fv_ty (C_Boxed, env_elt i))) :: sl
-  ) [] fv_mapping in
+  ) [] env_mapping in
 
   let closure_ctype = (C_FunPointer (ret_type, List.map fst typedparams)) in
 
   VarLibrary.set_ctype (C_FunPointer (ret_type, List.map fst typedparams_fun)) id_fun;
-  VarLibrary.set_ctype closure_ctype id;
 
   let closure =
     C_FunCall (C_GlobalVariable "ocaml_liballocs_close",
