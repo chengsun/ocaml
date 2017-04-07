@@ -736,10 +736,13 @@ and lambda_to_trev_statements env lam =
       let (ctype, sl_body, sl_hand) = unify_revsts ~hint:"trywith" trev_body trev_hand in
       let sl_hand = sl_hand @ [
           C_VarDeclare (C_Boxed, C_Variable param, Some (C_FunCall (C_GlobalVariable "ocaml_liballocs_get_exn", [])))
+          ; C_Expression (C_FunCall (C_GlobalVariable "OCAML_LIBALLOCS_EXN_POP", []))
         ]
       in
-      ctype, [C_If (C_FunCall (C_GlobalVariable "ocaml_liballocs_push_exn_handler", []),
-        sl_body, sl_hand)]
+      ctype,
+        [ C_If (C_BinaryOp ("==", C_IntLiteral Int64.zero, C_FunCall (C_GlobalVariable "OCAML_LIBALLOCS_EXN_SETJMP", [])), sl_body, sl_hand)
+        ; C_Expression (C_FunCall (C_GlobalVariable "OCAML_LIBALLOCS_EXN_PUSH", []))
+        ]
   | Lstaticcatch (lbody, (id, [](*vars, what do?*)), lhandler) ->
       let trev_body = lambda_to_trev_statements env lbody in
       let trev_hand = lambda_to_trev_statements env lhandler in

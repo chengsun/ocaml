@@ -7,7 +7,6 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <string.h>    // for memcpy
-#include <setjmp.h>    // for setjmp
 #include <sys/mman.h>  // for mmap
 
 #include "liballocs.h"
@@ -58,43 +57,20 @@ void Test__init();
 *****************************************************************************/
 
 // exception handling
-// TODO: currently this uses an explicit stored singly linked list. I figured this would be easier if I ever needed to debug. but it's really better for neatness/perf if all these next pointers were all implicitly on the stack
-struct ocaml_liballocs_exn_handler {
-    jmp_buf env;
-    struct ocaml_liballocs_exn_handler *next;
-};
+
 // the head of the exception handler linked list
-static struct ocaml_liballocs_exn_handler
-    *ocaml_liballocs_g_exn_handler_head = NULL;
+struct ocaml_liballocs_exn_handler
+    *__ocaml_liballocs_g_exn_handler_head = NULL;
 // the exception currently being handled
-static ocaml_value_t ocaml_liballocs_g_exn_handler_exn;
-
-// returns true on first invocation, false if handling exception
-bool ocaml_liballocs_push_exn_handler() {
-    {
-        // push us onto the head of the list
-        struct ocaml_liballocs_exn_handler *prev_head = ocaml_liballocs_g_exn_handler_head;
-        ocaml_liballocs_g_exn_handler_head = malloc(sizeof(struct ocaml_liballocs_exn_handler));
-        ocaml_liballocs_g_exn_handler_head->next = prev_head;
-    }
-
-    if (setjmp(ocaml_liballocs_g_exn_handler_head->env)) {
-        // pop us from the list again
-        ocaml_liballocs_g_exn_handler_head =
-            ocaml_liballocs_g_exn_handler_head->next;
-        return false;
-    } else {
-        return true;
-    }
-}
+static ocaml_value_t __ocaml_liballocs_g_exn_handler_exn;
 
 ocaml_value_t ocaml_liballocs_get_exn() {
-    return ocaml_liballocs_g_exn_handler_exn;
+    return __ocaml_liballocs_g_exn_handler_exn;
 }
 
 ocaml_value_t ocaml_liballocs_raise_exn(ocaml_value_t exn) {
-    ocaml_liballocs_g_exn_handler_exn = exn;
-    longjmp(ocaml_liballocs_g_exn_handler_head->env, 1);
+    __ocaml_liballocs_g_exn_handler_exn = exn;
+    longjmp(__ocaml_liballocs_g_exn_handler_head->env, 1);
 }
 
 
@@ -199,12 +175,14 @@ void ocaml_liballocs_show(ocaml_value_t obj) {
 
 int main() {
     // set up root exception handler
-    if (ocaml_liballocs_push_exn_handler()) {
+    OCAML_LIBALLOCS_EXN_PUSH();
+    if (0 == OCAML_LIBALLOCS_EXN_SETJMP()) {
         Test__init();
         return 0;
     } else { // catch
+        OCAML_LIBALLOCS_EXN_POP();
         fprintf(stderr, "Uncaught OCaml exception: %s\n",
-                (const char *)ocaml_liballocs_g_exn_handler_exn.p[0].p);
+                (const char *)ocaml_liballocs_get_exn().p[0].p);
         return 1;
     }
 }

@@ -11,7 +11,8 @@ for ml in $TESTS; do
     cp ./tests/${name}.ml /tmp/test.ml
     ./ocamlc -dlambda -target-liballocs -o /dev/null -g /tmp/test.ml
     gcc -ggdb -std=c99 -Wall -I. -o /tmp/test ./liballocs.c /tmp/test.c
-    diff -u <(/tmp/test) ./tests/${name}.expected || (echo ">>> Test failed!"; exit 1)
+    output=$(/tmp/test 2>&1) || true
+    echo "$output" | diff -u /dev/stdin ./tests/${name}.expected || (echo ">>> Test failed!"; exit 1)
 done
 
 echo "ALL TESTS PASSED!!!"
