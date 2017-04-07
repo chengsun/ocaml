@@ -519,7 +519,13 @@ and tclosurify id_fun env_mapping ret_type typedparams cbody =
   let env_mapping = List.mapi (fun i (fv_id,fv_tvalue) -> (i, (fv_id,fv_tvalue))) env_mapping in
   let env_elt i = C_ArrayIndex (C_Variable env_id, C_IntLiteral (Int64.of_int i)) in
 
-  let env_sl = [C_VarDeclare (C_Pointer C_Boxed, C_Variable env_id, Some (C_Allocate (C_Boxed, List.length env_mapping, Error "let_to_rev_statements environment")))] in
+  let env_sl =
+    [ C_VarDeclare (
+      C_Pointer C_Boxed,
+      C_Variable env_id,
+      Some (C_Allocate (C_Boxed, List.length env_mapping, Error "let_to_rev_statements environment"))
+    )]
+  in
   let env_sl = List.fold_left (fun sl (i, (_fv_id, fv_tvalue)) ->
     C_Assign (env_elt i, cast C_Boxed fv_tvalue) :: sl
   ) env_sl env_mapping in
