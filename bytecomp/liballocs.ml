@@ -928,20 +928,22 @@ let compile_implementation modulename lambda =
   let () = Fixup.reset () in
 
   let module_export_var = C_GlobalVariable modulename in (* no need to add export var to VarLibrary *)
-  let toplevel_sl =
+  let module_constructor_sl =
     match lambda with
     | Lprim (Psetglobal id, [lam]) when Ident.name id = modulename ->
       Translate.lambda_to_module_constructor_sl id Env.empty lam
     | lam -> failwith ("compile_implementation unexpected root: " ^ (formats Printlambda.lambda lam))
   in
-  let fixed_toplevel_sl = Fixup.fixup_rev_statements [] toplevel_sl in
+  let fixed_module_constructor_sl = Fixup.fixup_rev_statements [] module_constructor_sl in
   let the_module_constructor =
     C_FunDefn (C_Void, C_GlobalVariable (module_initialiser_name modulename), [], Some [
       C_If (C_GlobalVariable modulename,
             [C_Return None],
-            fixed_toplevel_sl)
+            fixed_module_constructor_sl)
     ])
   in
+
+  let fixed_toplevels = List.rev_map (map_toplevel (Fixup.fixup_rev_statements [])) !Translate.toplevels in
 
   (* NB: should be evaluated last when we know all types *)
   let global_typedecls =
@@ -950,6 +952,6 @@ let compile_implementation modulename lambda =
 
   [C_TopLevelComment "global typedecls:"] @ global_typedecls @
   [C_TopLevelComment "extern decls:"] @ !Translate.extern_decls @
-  [C_TopLevelComment "toplevels:"] @ (List.rev !Translate.toplevels) @
+  [C_TopLevelComment "toplevels:"] @ fixed_toplevels @
   [C_TopLevelComment "deinlined functions:"] @ !Fixup.deinlined_funs @
   [ C_TopLevelComment "the module constructor:" ; the_module_constructor]
