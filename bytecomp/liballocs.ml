@@ -7,6 +7,21 @@ open Types
 open Lambda
 
 
+let list_splitat n l =
+  let rec loop acc rest n =
+    match n, rest with
+    | 0, _ -> List.rev acc, rest
+    | _, (x::xs) -> loop (x::acc) xs (pred n)
+    | _, [] -> failwith "list_splitat: exceeded list length"
+  in
+  loop [] l n
+
+let rec list_drop n l =
+  match n, l with
+  | 0, _ -> l
+  | _, (x::xs) -> list_drop (pred n) xs
+  | _ -> failwith "list_drop: exceeded list length"
+
 let map_intersperse_concat f sep xs =
   let rec loop accum = function
     | [] -> accum
@@ -509,17 +524,16 @@ and lfunction_to_texpression env lam id params body =
   end else begin
     (* closure required *)
     let fv_mapping = List.map (fun v -> (v, (VarLibrary.ctype v, C_Variable v))) fv in
-    let id_fun = Ident.create ("__closure__" ^ (Ident.name id)) in
-    let cty, closure = tclosurify id_fun fv_mapping ret_type typedparams cbody in
+    let cty, closure = tclosurify (Ident.name id) fv_mapping ret_type typedparams cbody in
     (cty, closure), false
   end
 
 (* build a closure out of a base function's parts.
- * [id_fun] specifies the ID of a newly-defined base function (which should not be used/referenced elsewhere).
  * [env_mapping] specifies a mapping of (Ident.t * texpression) which represent variables in the environment, which cbody will have access to.
  * *)
-and tclosurify id_fun env_mapping ret_type typedparams cbody =
-  let env_id = Ident.create "env" in (* TODO dont make this if not used *)
+and tclosurify name_hint env_mapping ret_type typedparams cbody =
+  let id_fun = Ident.create ("__closure_" ^ name_hint) in (* the ID of the closure base function *)
+  let env_id = Ident.create "env" in
 
   let n_args = List.length typedparams in
 
@@ -762,11 +776,32 @@ and lambda_to_texpression env lam : C.texpression =
           C_Boxed, arg_ctypes, C_FunPointer (C_Boxed, arg_ctypes)
       | _ -> failwith "Lapply on non-function expression?"
     in
-    let cargs =
-      List.map2 (fun ctype x -> cast ctype (lambda_to_texpression env x))
-                  arg_ctypes ap_args
-    in
-    ret_ctype, C_FunCall (cast apfunc_actual_ctype (ctype, expr), cargs)
+    let c_ap_func = cast apfunc_actual_ctype (ctype, expr) in
+    let texpr_ap_args = List.map (lambda_to_texpression env) ap_args in
+    let n_args_actual = List.length arg_ctypes in
+    let n_args_applied = List.length ap_args in
+    if n_args_applied = n_args_actual then begin
+      (* complete application *)
+      let cargs =
+        List.map2 (fun ctype texpr -> cast ctype texpr) arg_ctypes texpr_ap_args
+      in
+      ret_ctype, C_FunCall (c_ap_func, cargs)
+    end else begin
+      (* partial_application *)
+      let arg_ctypes_and_ids =
+        List.mapi (fun i ctype -> ctype, Ident.create (Printf.sprintf "arg%d" i))
+          arg_ctypes
+      in
+      let arg_ctypes_and_ids_env, arg_ctypes_and_ids_params =
+        list_splitat n_args_applied arg_ctypes_and_ids
+      in
+      let env_mapping =
+        List.map2 (fun (arg_ctype, id) texpr -> (id, (arg_ctype, cast arg_ctype texpr)))
+          arg_ctypes_and_ids_env texpr_ap_args
+      in
+      let cbody = [ C_Return (Some (C_FunCall (c_ap_func, List.map (fun (_, id) -> C_Variable id) arg_ctypes_and_ids))) ] in
+      tclosurify "_partialapp" env_mapping ret_ctype arg_ctypes_and_ids_params cbody
+    end
   | _ ->
     (* fall back to trying full blown statements *)
     let ctype, rev_st = lambda_to_trev_statements env lam in
