@@ -57,7 +57,7 @@ ocaml_value_t ocaml_liballocs_raise_exn(ocaml_value_t exn);
 
 // closures
 
-generic_funcp_t ocaml_liballocs_close(generic_funcp_t fun, int n_args, int64_t *env);
+generic_funcp_t ocaml_liballocs_close(generic_funcp_t fun, int64_t n_args, ocaml_value_t *env);
 
 
 

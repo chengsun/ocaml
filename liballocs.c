@@ -92,7 +92,7 @@ static const int PAGE_SIZE = 4096;
  *
  * This function creates stubs assuming the calling convention follows the AMD64 System V standard.
  */
-generic_funcp_t ocaml_liballocs_close(generic_funcp_t fun, int n_args, int64_t *env) {
+generic_funcp_t ocaml_liballocs_close(generic_funcp_t fun, int64_t n_args, ocaml_value_t *env) {
     char buf[256];
     char *ptr = buf;
 

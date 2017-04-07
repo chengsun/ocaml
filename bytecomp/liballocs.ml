@@ -95,7 +95,7 @@ module C = struct
     | C_CharLiteral of char
     | C_GlobalVariable of string
     | C_Variable of Ident.t (* y *)
-    | C_ArrayIndex of expression * expression option (* <...>[] or <...>[0] *)
+    | C_ArrayIndex of expression * expression (* <...>[0] *)
     | C_Field of expression * string (* <...>.foo *)
     | C_InitialiserList of expression list (* { <...>, <...> } *)
     | C_Cast of ctype * expression
@@ -272,8 +272,7 @@ module Emitcode = struct
     | C_GlobalVariable id -> id
     | C_Variable id -> Ident.unique_name id
     | C_Field (e,f) -> Printf.sprintf "%s.%s" (expression_to_string e) f
-    | C_ArrayIndex (e,Some i) -> Printf.sprintf "%s[%s]" (expression_to_string e) (expression_to_string i)
-    | C_ArrayIndex (e,None) -> (expression_to_string e) ^ "[]"
+    | C_ArrayIndex (e,i) -> Printf.sprintf "%s[%s]" (expression_to_string e) (expression_to_string i)
     | C_InitialiserList es -> Printf.sprintf "{%s}" (map_intersperse_concat expression_to_string ", " es)
     | C_Cast (ty,e) -> Printf.sprintf "((%s)%s)" (ctype_to_string ty) (expression_to_string e)
     | C_UnaryOp (op,x) -> "(" ^ op ^ (expression_to_string x) ^ ")"
@@ -481,7 +480,8 @@ let do_allocation nwords (type_expr_result : _ result) =
   in
   C_Allocate(ctype, n, type_expr_result)
 
-(* translate a let* to a variable or function declaration *)
+(* translate a let* to a variable or function declaration. [id] can be used to refer
+ * to this let binding after the statements this returns *)
 let rec let_to_rev_statements env id lam =
   match lam with
   | Levent (body, ev) ->
@@ -489,8 +489,55 @@ let rec let_to_rev_statements env id lam =
   | Lfunction { params ; body } ->
     Printf.printf "Got a expression fun LET %s\n%!" (Ident.unique_name id);
     let ret_type, typedparams, cbody = let_to_function_parts env params body in
-    VarLibrary.set_ctype (C_FunPointer (ret_type, List.map fst typedparams)) id;
-    [C_Expression (C_InlineFunDefn (ret_type, C_Variable id, typedparams, cbody))]
+    let fv =
+      IdentSet.elements (free_variables (Lletrec([id, lam], lambda_unit))) in
+    let n_args = List.length params in
+
+
+    if fv = [] then begin
+      VarLibrary.set_ctype (C_FunPointer (ret_type, List.map fst typedparams)) id;
+      [C_Expression (C_InlineFunDefn (ret_type, C_Variable id, typedparams, cbody))]
+    end else begin
+      let id_fun = Ident.create ("__closure__" ^ (Ident.name id)) in
+      let env_id = Ident.create "env" in (* TODO dont make this if not used *)
+
+      let typedparam_env = C_Pointer C_Boxed, env_id in
+      let typedparams_fun =
+        typedparams @ (if n_args <= 5 then [typedparam_env] else [C_Pointer C_Void, Ident.create "unused" ; typedparam_env])
+      in
+
+      let mapping = List.mapi (fun i v -> (i,v)) fv in
+      let env_elt i = C_ArrayIndex (C_Variable env_id, C_IntLiteral (Int64.of_int i)) in
+
+      let env_sl = [C_VarDeclare (C_Pointer C_Boxed, C_Variable env_id, Some (C_Allocate (C_Boxed, List.length mapping, Error "let_to_rev_statements environment")))] in let env_sl = List.fold_left (fun sl (i,v) ->
+        C_Assign (env_elt i, C_Variable v) :: sl
+      ) env_sl mapping in
+
+      let unenv_sl = List.fold_left (fun sl (i,v) ->
+        C_VarDeclare (VarLibrary.ctype v, C_Variable v, Some (env_elt i)) :: sl
+      ) [] mapping in
+
+      let closure_ctype = (C_FunPointer (ret_type, List.map fst typedparams)) in
+
+      VarLibrary.set_ctype (C_FunPointer (ret_type, List.map fst typedparams_fun)) id_fun;
+      VarLibrary.set_ctype C_Boxed id;
+
+      let closure =
+        C_FunCall (C_GlobalVariable "ocaml_liballocs_close",
+          [ C_InlineFunDefn
+            ( ret_type
+            , C_Variable id_fun
+            , typedparams_fun
+            , cbody @ unenv_sl
+            )
+          ; C_IntLiteral (Int64.of_int n_args)
+          ; C_Variable env_id
+          ]
+        )
+      in
+
+      C_VarDeclare (C_Boxed, C_Variable id, Some (cast C_Boxed (closure_ctype, closure))) :: env_sl
+    end
   | _ ->
     let ctype, defn = lambda_to_texpression env lam in
     VarLibrary.set_ctype ctype id;
@@ -597,14 +644,14 @@ and lambda_to_texpression env lam : C.texpression =
       | Pfield i, [lam] ->
           (* TODO: make this use type-specific accessors if possible *)
           C_Boxed,
-          C_ArrayIndex (cast (C_Pointer C_Boxed) (lambda_to_texpression env lam), Some (C_IntLiteral (Int64.of_int i)))
+          C_ArrayIndex (cast (C_Pointer C_Boxed) (lambda_to_texpression env lam), C_IntLiteral (Int64.of_int i))
       | Psetfield (i, (Immediate | Pointer), Assignment), [lam; lval] ->
           (* note we assign immediates and pointers in the same way *)
           (* TODO: make this use type-specific accessors if possible *)
           C_Boxed,
           C_InlineRevStatements (C_Boxed, [
             C_Assign (
-              C_ArrayIndex (cast (C_Pointer C_Boxed) (lambda_to_texpression env lam), Some (C_IntLiteral (Int64.of_int i))),
+              C_ArrayIndex (cast (C_Pointer C_Boxed) (lambda_to_texpression env lam), C_IntLiteral (Int64.of_int i)),
               cast C_Boxed (lambda_to_texpression env lval)
             )
           ])
@@ -615,7 +662,7 @@ and lambda_to_texpression env lam : C.texpression =
             | [] -> (C_Expression var) :: statements
             | e_head::el ->
                 let texpr = lambda_to_texpression env e_head in
-                let elem = C_ArrayIndex (var, Some (C_IntLiteral (Int64.of_int k))) in
+                let elem = C_ArrayIndex (var, C_IntLiteral (Int64.of_int k)) in
                 let assign = C_Assign (elem, cast C_Boxed texpr) in
                 construct (succ k) (assign::statements) el
           in
@@ -657,7 +704,7 @@ and lambda_to_texpression env lam : C.texpression =
       | Pstringrefs, [es; en] ->
           let exps = cast (C_Pointer C_Char) (lambda_to_texpression env es) in
           let expn = cast (C_Int) (lambda_to_texpression env en) in
-          C_Char, C_ArrayIndex (exps, Some expn)
+          C_Char, C_ArrayIndex (exps, expn)
       | _ -> failwith ("lambda_to_expression Lprim " ^ (Printlambda.name_of_primitive prim))
     end
   | Lconst sc -> structured_constant_to_texpression env sc
@@ -788,6 +835,8 @@ let rec let_to_module_constructor_sl env id lam =
   | Levent (body, ev) ->
       let_to_module_constructor_sl (Envaux.env_from_summary ev.lev_env Subst.identity) id body
   | Lfunction { params ; body } ->
+      (* note that here, unlike in let_to_rev_statements, we do not check for closures
+       * because all free variables would be referring to globals *)
       Printf.printf "Got a fun LET %s\n%!" (Ident.unique_name id);
       let ret_type, typedparams, cbody = let_to_function_parts env params body in
       toplevels := C_FunDefn (ret_type, C_Variable id, typedparams, Some cbody) :: !toplevels;
@@ -862,12 +911,10 @@ let rec fixup_expression accum e = (* sticks inlined statements on the front of 
       let (accum', e') = fixup_expression accum e in accum', C_Blob (s1,e',s2)
   | C_Field (e,f) ->
       let (accum', e') = fixup_expression accum e in accum', C_Field (e',f)
-  | C_ArrayIndex (e, None) ->
-      let (accum', e') = fixup_expression accum e in accum', C_ArrayIndex (e', None)
-  | C_ArrayIndex (e, Some i) ->
+  | C_ArrayIndex (e, i) ->
       let (accum', e') = fixup_expression accum e in
       let (accum'', i') = fixup_expression accum' i in
-      accum'', C_ArrayIndex (e', Some i')
+      accum'', C_ArrayIndex (e', i')
   | C_Cast (ty,e) ->
       let (accum', e') = fixup_expression accum e in accum', C_Cast (ty,e')
   | C_UnaryOp (op,e) ->
