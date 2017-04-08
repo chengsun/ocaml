@@ -533,37 +533,42 @@ and lfunction_to_texpression env lam id params body =
  * *)
 and tclosurify name_hint env_mapping ret_type typedparams cbody =
   let id_fun = Ident.create ("__closure_" ^ name_hint) in (* the ID of the closure base function *)
-  let env_id = Ident.create "env" in
-
-  let n_args = List.length typedparams in
-
-  let typedparam_env = C_Pointer C_Boxed, env_id in
-  let typedparams_fun =
-    typedparams @ (if n_args <= 5 then [typedparam_env] else [C_Pointer C_Void, Ident.create "unused" ; typedparam_env])
-  in
 
   let env_mapping = List.mapi (fun i (fv_id,fv_tvalue) -> (i, (fv_id,fv_tvalue))) env_mapping in
-  let env_elt i = C_ArrayIndex (C_Variable env_id, C_IntLiteral (Int64.of_int i)) in
 
-  let env_sl =
-    [ C_VarDeclare (
-      C_Pointer C_Boxed,
-      C_Variable env_id,
-      Some (C_Allocate (C_Boxed, List.length env_mapping, Error "tclosurify environment"))
-    )]
+  let env_type, env_id, env_value, env_sl, unenv_sl =
+    match env_mapping with
+    | [] -> failwith "tclosurify called with empty environment"
+    | _ ->
+      let env_id = Ident.create "env" in
+      let env_elt i = C_ArrayIndex (C_Variable env_id, C_IntLiteral (Int64.of_int i)) in
+
+      let env_type = C_Pointer C_Boxed in
+      let env_sl =
+        [ C_VarDeclare (
+          env_type,
+          C_Variable env_id,
+          Some (C_Allocate (C_Boxed, List.length env_mapping, Error "tclosurify environment"))
+        )]
+      in
+      let env_sl = List.fold_left (fun sl (i, (_fv_id, fv_tvalue)) ->
+        C_Assign (env_elt i, cast C_Boxed fv_tvalue) :: sl
+      ) env_sl env_mapping in
+
+      let unenv_sl = List.fold_left (fun sl (i, (fv_id, (fv_ty, _))) ->
+        C_VarDeclare (fv_ty, C_Variable fv_id, Some (cast fv_ty (C_Boxed, env_elt i))) :: sl
+      ) [] env_mapping in
+
+      (env_type, env_id, C_Variable env_id, env_sl, unenv_sl)
   in
-  let env_sl = List.fold_left (fun sl (i, (_fv_id, fv_tvalue)) ->
-    C_Assign (env_elt i, cast C_Boxed fv_tvalue) :: sl
-  ) env_sl env_mapping in
 
-  let unenv_sl = List.fold_left (fun sl (i, (fv_id, (fv_ty, _))) ->
-    C_VarDeclare (fv_ty, C_Variable fv_id, Some (cast fv_ty (C_Boxed, env_elt i))) :: sl
-  ) [] env_mapping in
-
-  let closure_ctype = (C_FunPointer (ret_type, List.map fst typedparams)) in
-
+  let n_args = List.length typedparams in
+  let typedparams_fun =
+    typedparams @ (if n_args <= 5 then [env_type, env_id] else [C_Pointer C_Void, Ident.create "unused" ; env_type, env_id])
+  in
   VarLibrary.set_ctype (C_FunPointer (ret_type, List.map fst typedparams_fun)) id_fun;
 
+  let closure_ctype = (C_FunPointer (ret_type, List.map fst typedparams)) in
   let closure =
     C_FunCall (C_GlobalVariable "ocaml_liballocs_close",
       [ C_InlineFunDefn
@@ -573,7 +578,7 @@ and tclosurify name_hint env_mapping ret_type typedparams cbody =
         , cbody @ unenv_sl
         )
       ; C_IntLiteral (Int64.of_int n_args)
-      ; C_Variable env_id
+      ; cast C_Boxed (env_type, env_value)
       ]
     )
   in

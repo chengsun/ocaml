@@ -2,7 +2,7 @@
 
 set -e
 
-TESTS=`cd tests; ls -1 *.ml`
+TESTS=${1-`cd tests; ls -1 *.ml`}
 #TESTS="test_printf.ml"
 
 for ml in $TESTS; do
