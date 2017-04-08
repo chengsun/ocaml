@@ -323,11 +323,11 @@ module Emitcode = struct
         (map_intersperse_concat statement_to_string "\n" (List.rev sl)) ^ "\n}"
     | C_ForInt (p,lo,plim,hi,dir,sl) ->
         (* need hi to be inclusive! *)
-        Printf.sprintf "for (int64_t %s = %s, %s = %s; %s != %s; %s%s) {\n%s\n}"
+        Printf.sprintf "for (int64_t %s = %s, %s = %s; %s; %s) {\n%s\n}"
         (Ident.unique_name p) (expression_to_string lo)
-        (Ident.unique_name plim) (expression_to_string (C_BinaryOp ((match dir with Upto -> "+" | Downto -> "-"), hi, C_IntLiteral Int64.one)))
-        (Ident.unique_name p) (Ident.unique_name plim)
-        (Ident.unique_name p) (match dir with Upto -> "++" | Downto -> "--")
+        (Ident.unique_name plim) (expression_to_string hi)
+        (expression_to_string (C_BinaryOp ((match dir with Upto -> "<=" | Downto -> ">="), C_Variable p, C_Variable plim)))
+        (expression_to_string (C_UnaryOp ((match dir with Upto -> "++" | Downto -> "--"), C_Variable p)))
         (map_intersperse_concat statement_to_string "\n" (List.rev sl))
     | C_Return (Some e) -> "return " ^ (expression_to_string e) ^ ";"
     | C_Return None -> "return;"
