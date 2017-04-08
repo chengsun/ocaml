@@ -706,6 +706,10 @@ and tclosurify name_hint env_mapping ret_type typedparams cbody =
   let env_type, env_id, env_value, env_sl_letdefns, unenv_sl =
     match env_mapping with
     | [] -> failwith "tclosurify called with empty environment"
+    | [(0, (env_var_id, (env_var_type, env_var_value)))] ->
+      (* optimise for the case where only one value from the environment is used.
+       * in this case don't bother to allocate an environment, just pass the value in directly *)
+      env_var_type, env_var_id, env_var_value, [], []
     | _ ->
       let env_id = Ident.create "__env" in
       let env_elt i = C_ArrayIndex (C_Variable env_id, C_IntLiteral (Int64.of_int i)) in
