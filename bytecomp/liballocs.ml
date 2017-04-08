@@ -731,6 +731,7 @@ and lambda_to_texpression env lam : C.texpression =
       | Pintcomp(Cle), [e1;e2] -> intcmp_bop "<=" e1 e2
       | Pintcomp(Cgt), [e1;e2] -> intcmp_bop ">" e1 e2
       | Pintcomp(Cge), [e1;e2] -> intcmp_bop ">=" e1 e2
+      | Poffsetint n, [e] -> int_bop "+" e (Lconst (Const_base (Const_int n)))
       | Pccall {prim_name; prim_arity}, lam ->
           assert (List.length lam = prim_arity);
           let args =
