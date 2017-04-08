@@ -124,6 +124,8 @@ module C = struct
     | C_VarDeclare of ctype * expression * expression option
     | C_Assign of expression * expression
     | C_If of expression * statement list * statement list (* reversed! *)
+    | C_While of expression * statement list (* reversed! *)
+    | C_ForInt of Ident.t * expression * Ident.t * expression * direction_flag * statement list (* reversed! *)
     | C_Return of expression option
     | C_LabelDecl of string
     | C_LabelGoto of string
@@ -136,6 +138,8 @@ module C = struct
     | C_VarDeclare _ -> "C_VarDeclare"
     | C_Assign _ -> "C_Assign"
     | C_If _ -> "C_If"
+    | C_While _ -> "C_While"
+    | C_ForInt _ -> "C_ForInt"
     | C_Return _ -> "C_Return"
     | C_LabelDecl _ -> "C_LabelDecl"
     | C_LabelGoto _ -> "C_LabelGoto"
@@ -223,6 +227,9 @@ module C = struct
               assign_last_value_of_statement (tgt_type,id) (src_type,slt),
               assign_last_value_of_statement (tgt_type,id) (src_type,slf)) :: sl
         | C_Return _ | C_LabelGoto _ -> s :: sl (* the requested assignment doesn't matter, we're gone! *)
+        | C_While _ | C_ForInt _ ->
+            (* we know these always come from Lwhile/Lfor imperative constructs, which have type unit. hence this is safe to do: *)
+            f (C_PointerLiteral 0):: s :: sl
         | C_VarDeclare _ | C_LabelDecl _ ->
             failwith (Printf.sprintf "assign_last_value_of_statement: unexpected statement %s as last statement in sl" (statement_to_debug_string s))
       end
@@ -311,6 +318,17 @@ module Emitcode = struct
         "if (" ^ (expression_to_string e) ^ ") {\n" ^
         (map_intersperse_concat statement_to_string "\n" (List.rev ts)) ^ "\n} else {\n" ^
         (map_intersperse_concat statement_to_string "\n" (List.rev fs)) ^ "\n}"
+    | C_While (e,sl) ->
+        "while (" ^ (expression_to_string e) ^ ") {\n" ^
+        (map_intersperse_concat statement_to_string "\n" (List.rev sl)) ^ "\n}"
+    | C_ForInt (p,lo,plim,hi,dir,sl) ->
+        (* need hi to be inclusive! *)
+        Printf.sprintf "for (int64_t %s = %s, %s = %s; %s != %s; %s%s) {\n%s\n}"
+        (Ident.unique_name p) (expression_to_string lo)
+        (Ident.unique_name plim) (expression_to_string (C_BinaryOp ((match dir with Upto -> "+" | Downto -> "-"), hi, C_IntLiteral Int64.one)))
+        (Ident.unique_name p) (Ident.unique_name plim)
+        (Ident.unique_name p) (match dir with Upto -> "++" | Downto -> "--")
+        (map_intersperse_concat statement_to_string "\n" (List.rev sl))
     | C_Return (Some e) -> "return " ^ (expression_to_string e) ^ ";"
     | C_Return None -> "return;"
     | C_LabelDecl s -> s ^ ":;"
@@ -846,6 +864,21 @@ and lambda_to_trev_statements env lam =
       let trev_f = lambda_to_trev_statements env lf in
       let (ctype, sl_t, sl_f) = unify_revsts ~hint:"ifthenelse" trev_t trev_f in
       ctype, [C_If (cexpr_cond, sl_t, sl_f)]
+  | Lwhile (lcond, lbody) ->
+      let cexpr_cond = cast C_Bool (lambda_to_texpression env lcond) in
+      let (ctype_body, sl_body) = lambda_to_trev_statements env lbody in
+      (* NB: loops are always imperative constructs with return type unit *)
+      C_Pointer C_Void, [C_While (cexpr_cond, sl_body)]
+  | Lfor (param, lo, hi, dir, lbody) ->
+      VarLibrary.set_ctype C_Int param;
+      let cexpr_lo = cast C_Int (lambda_to_texpression env lo) in
+      let cexpr_hi = cast C_Int (lambda_to_texpression env hi) in
+      let (ctype_body, sl_body) = lambda_to_trev_statements env lbody in
+      let plim = Ident.create "_limit" in
+      VarLibrary.set_ctype C_Int plim;
+      (* NB: loops are always imperative constructs with return type unit *)
+      C_Pointer C_Void, [C_ForInt (param, cexpr_lo, plim, cexpr_hi, dir, sl_body)]
+
   | Ltrywith (lbody, param, lhandler) ->
       VarLibrary.set_ctype C_Boxed param;
       let trev_body = lambda_to_trev_statements env lbody in
@@ -1021,6 +1054,11 @@ and fixup_rev_statements rev_defun accum sl = (* sticks fixed up sl on the front
         | C_VarDeclare (ty,eid,Some e) -> let (accum', e') = fixup_expression rev_defun accum e in C_VarDeclare (ty,eid,Some e') :: accum'
         | C_Assign (eid,e) -> let (accum', e') = fixup_expression rev_defun accum e in C_Assign (eid,e') :: accum'
         | C_If (e,slt,slf) -> let (accum', e') = fixup_expression rev_defun accum e in (C_If (e', loop_start [] slt, loop_start [] slf)) :: accum'
+        | C_While (e,sl) -> let (accum', e') = fixup_expression rev_defun accum e in (C_While (e', loop_start [] sl)) :: accum'
+        | C_ForInt (p,l,plim,h,d,sl) ->
+            let (accum', l') = fixup_expression rev_defun accum l in
+            let (accum'', h') = fixup_expression rev_defun accum' h in
+            C_ForInt (p,l',plim,h',d, loop_start [] sl) :: accum''
         | C_Return (Some e) -> let (accum', e') = fixup_expression rev_defun accum e in (C_Return (Some e')) :: accum'
         | C_Return (None) | C_LabelDecl _ | C_LabelGoto _ ->
             s :: accum
