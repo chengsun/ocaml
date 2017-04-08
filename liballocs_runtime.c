@@ -71,72 +71,39 @@ static const int PAGE_SIZE = 4096;
  * This function creates stubs assuming the calling convention follows the AMD64 System V standard.
  */
 generic_funcp_t ocaml_liballocs_close(generic_funcp_t fun, int64_t n_args, ocaml_value_t env) {
-    char buf[256];
-    char *ptr = buf;
-
-    bool stack_passing = false;
-    switch (n_args) {
-    case 0:  *ptr++ = 0x48; *ptr++ = 0xbf; break; // mov rdi (env), ...
-    case 1:  *ptr++ = 0x48; *ptr++ = 0xbe; break; // mov rsi (env), ...
-    case 2:  *ptr++ = 0x48; *ptr++ = 0xba; break; // mov rdx (env), ...
-    case 3:  *ptr++ = 0x48; *ptr++ = 0xb9; break; // mov rcx (env), ...
-    case 4:  *ptr++ = 0x49; *ptr++ = 0xb8; break; // mov r8 (env), ...
-    case 5:  *ptr++ = 0x49; *ptr++ = 0xb9; break; // mov r9 (env), ...
-    default: *ptr++ = 0x49; *ptr++ = 0xbb; stack_passing = true; // mov r11 (env), ...
-    }
-
-    assert(sizeof(env) == 8);
-    memcpy(ptr, &env, 8);
-    ptr += 8;
-
-    if (stack_passing) {
-        // push r11 (env)
-        *ptr++ = 0x41;
-        *ptr++ = 0x53;
-    }
-
-    // mov r10 (fp), ...
-    *ptr++ = 0x49;
-    *ptr++ = 0xba;
-
-    assert(sizeof(generic_funcp_t) == 8);
-    memcpy(ptr, &fun, 8);
-    ptr += 8;
-
-    if (!stack_passing) {
-        // jmp r10 (fp)
-        *ptr++ = 0x41;
-        *ptr++ = 0xff;
-        *ptr++ = 0xe2;
-    } else {
-        // call r10 (fp)
-        *ptr++ = 0x41;
-        *ptr++ = 0xff;
-        *ptr++ = 0xd2;
-
-        // pop rcx (env)
-        *ptr++ = 0x59;
-
-        // ret
-        *ptr++ = 0xc3;
-    }
-
-    int len = ptr - buf;
-
+    bool stack_passing = n_args > 5;
+    int len = stack_passing ? 27 : 23;  // bytes
     if (__closure_buffer == NULL || PAGE_SIZE - __closure_buffer_i < len) {
         // allocate a new page
         __closure_buffer = mmap(NULL, PAGE_SIZE, PROT_WRITE | PROT_EXEC,
                               MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
         __closure_buffer_i = 0;
     }
-
-    memcpy(__closure_buffer + __closure_buffer_i, buf, len);
-
-    generic_funcp_t the_closure = (generic_funcp_t) (__closure_buffer + __closure_buffer_i);
-
+    char *buf = (char *) (__closure_buffer + __closure_buffer_i);
     __closure_buffer_i += len;
 
-    return the_closure;
+    if (stack_passing) {
+        memcpy(buf+0, "\x49\xbb", 2); // mov r11 (env), ...
+        memcpy(buf+2, &env, 8);
+        memcpy(buf+10, "\x41\x53\x49\xba", 4); // push r11 (env); mov r10 (fp), ...
+        memcpy(buf+14, &fun, 8);
+        memcpy(buf+22, "\x41\xff\xd2\x59\xc3", 5); // call r10 (fp); pop rcx (env); ret
+    } else {
+        static const int16_t lookups[] = {
+            0xbf48, // mov rdi (env), ...
+            0xbe48, // mov rsi (env), ...
+            0xba48, // mov rdx (env), ...
+            0xb948, // mov rcx (env), ...
+            0xb849, // mov r8 (env), ...
+            0xb949, // mov r9 (env), ...
+        };
+        memcpy(buf+0, &lookups[n_args], 2);
+        memcpy(buf+2, &env, 8);
+        memcpy(buf+10, "\x49\xba", 2); // mov r10 (fp), ...
+        memcpy(buf+12, &fun, 8);
+        memcpy(buf+20, "\x41\xff\xe2", 3); // jmp r10 (fp)
+    }
+    return (generic_funcp_t) buf;
 }
 
 
