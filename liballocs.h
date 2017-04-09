@@ -1,6 +1,7 @@
 #ifndef OCAML_LIBALLOCS_H
 #define OCAML_LIBALLOCS_H
 
+#include <stdlib.h>    // for malloc
 #include <stdint.h>
 #include <stdbool.h>
 #include <setjmp.h>    // for setjmp
