@@ -505,6 +505,20 @@ let do_allocation nwords (type_expr_result : _ result) =
   in
   C_Allocate(ctype, n, type_expr_result)
 
+(* TODO this is all bad *)
+let get_function_type env params =
+  let typedparams = List.map (fun id ->
+      (*ENV
+        Printf.printf "We have these in env: %s\n%!" (dumps_env env);
+        Printf.printf "Looking up type of %s\n%!" (Ident.unique_name id);
+        let (p, ty) = Env.lookup_value (Longident.Lident (Ident.name id)) env in
+        C_Boxed ty.val_type, id
+      *)
+      C_Boxed, id
+    ) params in
+  let ret_type = C_Boxed in
+  ret_type, typedparams
+
 (* translate a let* to a variable or function declaration. [id] can be used to refer
  * to this let binding after the statements this returns *)
 let rec let_to_rev_statements env id lam =
@@ -530,7 +544,8 @@ let rec let_to_rev_statements env id lam =
 (* returns (cty, expr), globally_accessible
  * where globally_accessible=true means no variable should be defined to bind the resulting expression as the function is globally accessible *)
 and lfunction_to_texpression env lam id params body =
-  let ret_type, typedparams, cbody = let_to_function_parts env params body in
+  let ret_type, typedparams = get_function_type env params in
+  let cbody = let_function_to_rev_statements env (ret_type, typedparams) body in
   let fv = IdentSet.elements (free_variables (Lletrec([id, lam], lambda_unit))) in
 
   if fv = [] then begin
@@ -603,22 +618,11 @@ and tclosurify name_hint env_mapping ret_type typedparams cbody =
   closure_ctype, C_InlineRevStatements (closure_ctype, C_Expression (closure) :: env_sl)
 
 (* translate a function let-binding into (ret_type, typedparams, cbody) *)
-and let_to_function_parts env params body =
-  let typedparams = List.map (fun id ->
-      (*ENV
-        Printf.printf "We have these in env: %s\n%!" (dumps_env env);
-        Printf.printf "Looking up type of %s\n%!" (Ident.unique_name id);
-        let (p, ty) = Env.lookup_value (Longident.Lident (Ident.name id)) env in
-        C_Boxed ty.val_type, id
-      *)
-      C_Boxed, id
-    ) params in
-  (* TODO: determine ret type of function*)
-  let ret_type = C_Boxed in
+and let_function_to_rev_statements env (ret_type, typedparams) body =
   let typedparams_types = List.map fst typedparams in
   let ret_var_id = VarLibrary.create ret_type "_return_value" in
   (* be careful to assign the param types before lambda_to_trev_statements *)
-  List.iter2 (fun ctype id -> VarLibrary.set_ctype ctype id) typedparams_types params;
+  List.iter (fun (ctype, id) -> VarLibrary.set_ctype ctype id) typedparams;
   let rev_st =
     assign_last_value_of_statement (ret_type, ret_var_id) (lambda_to_trev_statements env body)
   in
@@ -627,7 +631,7 @@ and let_to_function_parts env params body =
     rev_st @
     [C_VarDeclare (ret_type, C_Variable ret_var_id, None)]
   in
-  (ret_type, typedparams, cbody)
+  cbody
 
 
 (* Translates a structured constant into an expression and its ctype *)
@@ -940,7 +944,8 @@ let rec let_to_module_constructor_sl env id lam =
       (* note that here, unlike in let_to_rev_statements, we do not check for closures
        * because all free variables would be referring to globals *)
       Printf.printf "Got a fun LET %s\n%!" (Ident.unique_name id);
-      let ret_type, typedparams, cbody = let_to_function_parts env params body in
+      let ret_type, typedparams = get_function_type env params in
+      let cbody = let_function_to_rev_statements env (ret_type, typedparams) body in
       rev_toplevels := C_FunDefn (ret_type, C_Variable id, typedparams, Some cbody) :: !rev_toplevels;
       VarLibrary.set_ctype (C_FunPointer (ret_type, List.map fst typedparams)) id;
       []
