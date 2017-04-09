@@ -352,7 +352,7 @@ module Emitcode = struct
         (map_intersperse_concat (fun (t,id) -> (ctype_to_string t) ^ " " ^ (Ident.unique_name id)) ", " args) ^ ")" ^
         ( match xs_option with
           | None -> ";"
-          | Some xs -> "{\n" ^ (rev_statements_to_string xs) ^ "\n}"
+          | Some xs -> " {\n" ^ (rev_statements_to_string xs) ^ "\n}"
         )
 
 
@@ -989,17 +989,23 @@ end
 module Fixup = struct
 
 type t =
-  { rev_fwd_decls      : toplevel list ref
-  ; rev_deinlined_funs : toplevel list ref
-  }
+  { rev_deinlined_funs : toplevel list ref }
 
 let new_state () =
-  { rev_fwd_decls      = ref []
-  ; rev_deinlined_funs = ref []
-  }
+  { rev_deinlined_funs = ref [] }
 
 let get_toplevels_from_state t =
-  List.rev_append !(t.rev_fwd_decls) (List.rev !(t.rev_deinlined_funs))
+  (* emit function declarations for each deinlined fun. then the definitions.
+   * this is so mutually recursive functions know each other *)
+  let deinlined_funs_decls =
+    List.fold_left (fun accum toplevel ->
+      match toplevel with
+      | C_FunDefn (ctype, name, args, Some sl) ->
+          C_FunDefn (ctype, name, args, None) :: accum
+      | _ -> accum
+    ) [] !(t.rev_deinlined_funs)
+  in
+  deinlined_funs_decls @ (List.rev !(t.rev_deinlined_funs))
 
 let rec fixup_expression t accum e = (* sticks inlined statements on the front of accum *)
   match e with
