@@ -102,7 +102,7 @@ module C = struct
   type expression =
     | C_Blob of (string * expression * string)
     | C_InlineRevStatements of ctype * statement list (* putting a statement where an expression belongs; this needs to be extracted in a later pass. ctype necessary annotation *)
-    | C_InlineFunDefn of ctype(*return*) * expression(*name*) * (ctype * Ident.t) list * statement list
+    | C_InlineFunDefn of ctype(*return*) * Ident.t(*name*) * (ctype * Ident.t) list * statement list
     | C_IntLiteral of Int64.t
     | C_FloatLiteral of string
     | C_PointerLiteral of int
@@ -278,7 +278,7 @@ module Emitcode = struct
     | C_InlineRevStatements (cty, sl) -> Printf.sprintf "/*FIXME:inline %s*/{\n%s\n}" (ctype_to_string cty) (rev_statements_to_string sl)
     | C_InlineFunDefn (retty, name, args, sl) -> Printf.sprintf "/*FIXME:inline fun %s %s (%s)*/{\n%s\n}"
                               (ctype_to_string retty)
-                              (expression_to_string name)
+                              (Ident.unique_name name)
                               (map_intersperse_concat (fun (t,id) -> (ctype_and_identifier_to_string t (C_Variable id))) ", " args)
                               (rev_statements_to_string sl)
     | C_IntLiteral i -> Int64.to_string i
@@ -537,7 +537,7 @@ and lfunction_to_texpression env lam id params body =
     (* plain function *)
     let cty = C_FunPointer (ret_type, List.map fst typedparams) in
     VarLibrary.set_ctype cty id;
-    (cty, C_InlineFunDefn (ret_type, C_Variable id, typedparams, cbody)), true
+    (cty, C_InlineFunDefn (ret_type, id, typedparams, cbody)), true
 
   end else begin
     (* closure required *)
@@ -591,7 +591,7 @@ and tclosurify name_hint env_mapping ret_type typedparams cbody =
     C_FunCall (C_GlobalVariable "ocaml_liballocs_close",
       [ C_InlineFunDefn
         ( ret_type
-        , C_Variable id_fun
+        , id_fun
         , typedparams_fun
         , cbody @ unenv_sl
         )
@@ -1003,8 +1003,8 @@ let rec fixup_expression rev_defun accum e = (* sticks inlined statements on the
       sl'', C_Variable id
   | C_InlineFunDefn (retty, name, args, sl) ->
       let sl' = fixup_rev_statements rev_defun [] sl in
-      rev_defun := (C_FunDefn (retty, name, args, Some sl')) :: !rev_defun;
-      accum, name
+      rev_defun := (C_FunDefn (retty, C_Variable name, args, Some sl')) :: !rev_defun;
+      accum, C_Variable name
   | C_IntLiteral _ | C_FloatLiteral _ | C_PointerLiteral _ | C_StringLiteral _ | C_CharLiteral _
   | C_Variable _ | C_GlobalVariable _ | C_Allocate _ -> accum, e
   | C_Blob (s1,e,s2) ->
