@@ -1061,8 +1061,7 @@ let rec fixup_expression t accum e = (* sticks inlined statements on the front o
 
 and fixup_rev_statements t accum sl = (* sticks fixed up sl on the front of accum *)
   let tf = { t with global_scope = false } in
-  let rec loop_start accum xs = loop accum (List.rev xs)
-  and loop accum = function
+  let rec loop accum = function
     | [] -> accum
     | s::statements ->
       let accum'' =
@@ -1085,19 +1084,19 @@ and fixup_rev_statements t accum sl = (* sticks fixed up sl on the front of accu
         | C_VarDeclare (ty,eid,None) -> C_VarDeclare (ty,eid,None) :: accum
         | C_VarDeclare (ty,eid,Some e) -> let (accum', e') = fixup_expression tf accum e in C_VarDeclare (ty,eid,Some e') :: accum'
         | C_Assign (eid,e) -> let (accum', e') = fixup_expression tf accum e in C_Assign (eid,e') :: accum'
-        | C_If (e,slt,slf) -> let (accum', e') = fixup_expression tf accum e in (C_If (e', loop_start [] slt, loop_start [] slf)) :: accum'
-        | C_While (e,sl) -> let (accum', e') = fixup_expression tf accum e in (C_While (e', loop_start [] sl)) :: accum'
+        | C_If (e,slt,slf) -> let (accum', e') = fixup_expression tf accum e in (C_If (e', fixup_rev_statements tf [] slt, fixup_rev_statements tf [] slf)) :: accum'
+        | C_While (e,sl) -> let (accum', e') = fixup_expression tf accum e in (C_While (e', fixup_rev_statements tf [] sl)) :: accum'
         | C_ForInt (p,l,plim,h,d,sl) ->
             let (accum', l') = fixup_expression tf accum l in
             let (accum'', h') = fixup_expression tf accum' h in
-            C_ForInt (p,l',plim,h',d, loop_start [] sl) :: accum''
+            C_ForInt (p,l',plim,h',d, fixup_rev_statements tf [] sl) :: accum''
         | C_Return (Some e) -> let (accum', e') = fixup_expression tf accum e in (C_Return (Some e')) :: accum'
         | C_Return (None) | C_LabelDecl _ | C_LabelGoto _ ->
             s :: accum
       in
       loop accum'' statements
   in
-  loop_start accum sl
+  loop accum (List.rev sl)
 
 end
 
