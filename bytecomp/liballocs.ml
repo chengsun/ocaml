@@ -492,12 +492,9 @@ module Translate = struct
 
 (* things we use from other modules *)
 let extern_decls = ref []
-(* things we declared at the toplevels ourselves, REVERSED *)
-let rev_toplevels = ref []
 
 let reset () =
-  extern_decls := [];
-  rev_toplevels := []
+  extern_decls := []
 
 let do_allocation nwords (type_expr_result : _ result) =
   let ctype, n =
@@ -539,13 +536,13 @@ let rec let_to_rev_statements env id lam =
       [C_Expression expr]
     end else begin
       VarLibrary.set_ctype cty id;
-      [C_VarDeclare (cty, C_Variable id, Some expr)]
+      [C_InlineVarDefn (cty, id, expr)]
     end
 
   | _ ->
     let ctype, defn = lambda_to_texpression env lam in
     VarLibrary.set_ctype ctype id;
-    [C_VarDeclare (ctype, C_Variable id, Some defn)]
+    [C_InlineVarDefn (ctype, id, defn)]
 
 (* returns (cty, expr), globally_accessible
  * where globally_accessible=true means no variable should be defined to bind the resulting expression as the function is globally accessible *)
@@ -955,46 +952,36 @@ let rec let_to_module_constructor_sl env id lam =
       Printf.printf "Got a fun LET %s\n%!" (Ident.unique_name id);
       let ret_type, typedparams = get_function_type env params in
       let cbody = let_function_to_rev_statements env (ret_type, typedparams) body in
-      rev_toplevels := C_FunDefn (ret_type, C_Variable id, typedparams, Some cbody) :: !rev_toplevels;
       VarLibrary.set_ctype (C_FunPointer (ret_type, List.map fst typedparams)) id;
-      []
+      [C_InlineFunDefn (ret_type, id, typedparams, cbody)]
   | _ ->
-      let ctype, sl = lambda_to_trev_statements env lam in
-      let cbody =
-        C_Assign (C_Variable id, C_InlineRevStatements (ctype, sl))
-      in
-      rev_toplevels := C_GlobalDefn (ctype, C_Variable id, None) :: !rev_toplevels;
-      VarLibrary.set_ctype ctype id;
-      [cbody]
+      let_to_rev_statements env id lam
 
-(* entry point: translates the root lambda into a statement list for the module constructor.
- * also populates rev_toplevels *)
-let rec lambda_to_module_constructor_sl module_id env lam =
+(* entry point: translates the root lambda into a statement list for the module constructor. *)
+let rec lambda_to_module_constructor_sl export_var env lam =
   match lam with
   | Levent (body, ev) ->
-      lambda_to_module_constructor_sl module_id (Envaux.env_from_summary ev.lev_env Subst.identity) body
+      lambda_to_module_constructor_sl export_var (Envaux.env_from_summary ev.lev_env Subst.identity) body
   | Llet (_strict, id, args, body) ->
       Printf.printf "Got a LET %s\n%!" (Ident.unique_name id);
       (* evaluation order important for type propagation *)
       let a = let_to_module_constructor_sl env id args in
-      let b = lambda_to_module_constructor_sl module_id env body in
+      let b = lambda_to_module_constructor_sl export_var env body in
       b @ a
   | Lletrec ([id, args], body) ->
       Printf.printf "Got a LETREC %s\n%!" (Ident.unique_name id);
       (* evaluation order important for type propagation *)
       let a = let_to_module_constructor_sl env id args in
-      let b = lambda_to_module_constructor_sl module_id env body in
+      let b = lambda_to_module_constructor_sl export_var env body in
       b @ a
   | Lsequence (l1, l2) -> (* let () = l1;; l2 *)
       let cbody1 = snd (lambda_to_trev_statements env l1) in
-      let cbody2 = lambda_to_module_constructor_sl module_id env l2 in
+      let cbody2 = lambda_to_module_constructor_sl export_var env l2 in
       cbody2 @ cbody1;
   | Lprim (Pmakeblock(tag, Immutable, tyinfo), largs) ->
       (* This is THE immutable makeblock at the toplevel. *)
       let ctype, es = lambda_to_texpression env lam in
       assert (ctype = C_Pointer C_Boxed);
-      let export_var = C_GlobalVariable (Ident.name module_id) in (* no need to add export var to VarLibrary *)
-      rev_toplevels := C_GlobalDefn (ctype, export_var, None) (* .bss initialised to NULL *) :: !rev_toplevels;
       [C_Assign (export_var, es)]
   | _ -> failwith ("lambda_to_module_constructor_sl " ^ (formats Printlambda.lambda lam))
 
@@ -1125,34 +1112,21 @@ let compile_implementation modulename lambda =
   let module_constructor_sl =
     match lambda with
     | Lprim (Psetglobal id, [lam]) when Ident.name id = modulename ->
-      Translate.lambda_to_module_constructor_sl id Env.empty lam
+      Translate.lambda_to_module_constructor_sl module_export_var Env.empty lam
     | lam -> failwith ("compile_implementation unexpected root: " ^ (formats Printlambda.lambda lam))
   in
-  let the_module_constructor =
-    C_FunDefn (C_Void, C_GlobalVariable (module_initialiser_name modulename), [], Some [
-      C_If (C_GlobalVariable modulename,
-            [C_Return None],
-            module_constructor_sl)
-    ])
-  in
 
-  let rev_all_toplevels =
-    (true, the_module_constructor) ::
-      (List.map (fun x -> false, x) !Translate.rev_toplevels)
-  in
+  let fix_state = Fixup.new_state ~global_scope:true in
+  let fixed_module_constructor_sl = Fixup.fixup_rev_statements fix_state [] module_constructor_sl in
 
   let fixed_toplevels =
-    List.fold_left (fun accum (global_scope, toplevel) ->
-      let fix_state = Fixup.new_state ~global_scope in
-      let fixed_toplevel =
-        map_toplevel (fun sl ->
-          let fixed_sl = Fixup.fixup_rev_statements fix_state [] sl in
-          fixed_sl
-        ) toplevel
-      in
-      (* NB: we're folding over a reversed source list, so accum ends up the right way round *)
-      (Fixup.get_toplevels_from_state fix_state) @ fixed_toplevel :: accum
-    ) [] rev_all_toplevels
+    (Fixup.get_toplevels_from_state fix_state) @
+    [ C_FunDefn (C_Void, C_GlobalVariable (module_initialiser_name modulename), [], Some [
+        C_If (C_GlobalVariable modulename,
+              [C_Return None],
+              fixed_module_constructor_sl)
+      ])
+    ]
   in
 
   (* NB: should be evaluated last when we know all types *)
@@ -1162,4 +1136,6 @@ let compile_implementation modulename lambda =
 
   [C_TopLevelComment "global typedecls:"] @ global_typedecls @
   [C_TopLevelComment "extern decls:"] @ !Translate.extern_decls @
-  [C_TopLevelComment "toplevels:"] @ fixed_toplevels
+  [C_TopLevelComment "toplevels:"] @ [
+    C_GlobalDefn (C_Pointer C_Boxed, module_export_var, None)
+  ] @ fixed_toplevels
