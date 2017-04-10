@@ -541,7 +541,6 @@ let rec let_to_rev_statements env id lam =
   | Levent (body, ev) ->
     let_to_rev_statements (Envaux.env_from_summary ev.lev_env Subst.identity) id body
   | Lfunction { params ; body } ->
-    Printf.printf "Got a expression fun LET %s\n%!" (Ident.unique_name id);
     let cty, st = lfunction_to_tstatement env lam id params body in
     [st]
   | _ ->
@@ -777,7 +776,6 @@ and lambda_to_texpression env lam : C.texpression =
   | Lvar id -> VarLibrary.ctype id, C_Variable id
   | Lfunction { params ; body } ->
     let id = Ident.create "__lambda" in
-    Printf.printf "Got a lambda fun LET %s\n%!" (Ident.unique_name id);
     let cty, st = lfunction_to_tstatement env lam id params body in
     cty, C_InlineRevStatements (cty, [st])
   | Lapply { ap_func = e_id ; ap_args } ->
@@ -945,7 +943,6 @@ let rec let_to_module_constructor_sl env id lam =
   | Lfunction { params ; body } ->
       (* note that here, unlike in let_to_rev_statements, we do not check for closures
        * because all free variables would be referring to globals *)
-      Printf.printf "Got a fun LET %s\n%!" (Ident.unique_name id);
       let ret_type, typedparams = get_function_type env params in
       let cbody = let_function_to_rev_statements env (ret_type, typedparams) body in
       VarLibrary.set_ctype (C_FunPointer (ret_type, List.map fst typedparams)) id;
@@ -959,13 +956,11 @@ let rec lambda_to_module_constructor_sl export_var env lam =
   | Levent (body, ev) ->
       lambda_to_module_constructor_sl export_var (Envaux.env_from_summary ev.lev_env Subst.identity) body
   | Llet (_strict, id, args, body) ->
-      Printf.printf "Got a LET %s\n%!" (Ident.unique_name id);
       (* evaluation order important for type propagation *)
       let a = let_to_module_constructor_sl env id args in
       let b = lambda_to_module_constructor_sl export_var env body in
       b @ a
   | Lletrec ([id, args], body) ->
-      Printf.printf "Got a LETREC %s\n%!" (Ident.unique_name id);
       (* evaluation order important for type propagation *)
       let a = let_to_module_constructor_sl env id args in
       let b = lambda_to_module_constructor_sl export_var env body in
