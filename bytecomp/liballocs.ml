@@ -102,7 +102,6 @@ module C = struct
   type expression =
     | C_Blob of (string * expression * string)
     | C_InlineRevStatements of ctype * statement list (* putting a statement where an expression belongs; this needs to be extracted in a later pass. ctype necessary annotation *)
-    | C_InlineFunDefn of ctype(*return*) * Ident.t(*name*) * (ctype * Ident.t) list * statement list
     | C_IntLiteral of Int64.t
     | C_FloatLiteral of string
     | C_PointerLiteral of int
@@ -120,6 +119,8 @@ module C = struct
     | C_Allocate of ctype * int(*multiplier*) * (Types.type_expr, string) result (* for debugging only *)
 
   and statement =
+    | C_InlineFunDefn of ctype(*return*) * Ident.t(*name*) * (ctype * Ident.t) list * statement list
+    | C_InlineVarDefn of ctype * Ident.t * expression
     | C_Expression of expression
     | C_VarDeclare of ctype * expression * expression option
     | C_Assign of expression * expression
@@ -134,6 +135,8 @@ module C = struct
 
   (* just for debugging, nothing useful *)
   let statement_to_debug_string = function
+    | C_InlineFunDefn _ -> "C_InlineFunDefn"
+    | C_InlineVarDefn _ -> "C_InlineVarDefn"
     | C_Expression _ -> "C_Expression"
     | C_VarDeclare _ -> "C_VarDeclare"
     | C_Assign _ -> "C_Assign"
@@ -230,6 +233,7 @@ module C = struct
         | C_While _ | C_ForInt _ ->
             (* we know these always come from Lwhile/Lfor imperative constructs, which have type unit. hence this is safe to do: *)
             f (C_PointerLiteral 0):: s :: sl
+        | C_InlineFunDefn _ | C_InlineVarDefn _
         | C_VarDeclare _ | C_LabelDecl _ ->
             failwith (Printf.sprintf "assign_last_value_of_statement: unexpected statement %s as last statement in sl" (statement_to_debug_string s))
       end
@@ -276,11 +280,6 @@ module Emitcode = struct
   and expression_to_string = function
     | C_Blob (s1, e, s2) -> Printf.sprintf "%s%s%s" s1 (expression_to_string e) s2
     | C_InlineRevStatements (cty, sl) -> Printf.sprintf "/*FIXME:inline %s*/{\n%s\n}" (ctype_to_string cty) (rev_statements_to_string sl)
-    | C_InlineFunDefn (retty, name, args, sl) -> Printf.sprintf "/*FIXME:inline fun %s %s (%s)*/{\n%s\n}"
-                              (ctype_to_string retty)
-                              (Ident.unique_name name)
-                              (map_intersperse_concat (fun (t,id) -> (ctype_and_identifier_to_string t (C_Variable id))) ", " args)
-                              (rev_statements_to_string sl)
     | C_IntLiteral i -> Int64.to_string i
     | C_FloatLiteral f -> f
     | C_PointerLiteral i -> Printf.sprintf "((void*)%d)" i
@@ -306,6 +305,15 @@ module Emitcode = struct
     end
 
   and statement_to_string = function
+    | C_InlineFunDefn (retty, name, args, sl) -> Printf.sprintf "/*FIXME:inline fun %s %s (%s)*/{\n%s\n}"
+                              (ctype_to_string retty)
+                              (Ident.unique_name name)
+                              (map_intersperse_concat (fun (t,id) -> (ctype_and_identifier_to_string t (C_Variable id))) ", " args)
+                              (rev_statements_to_string sl)
+    | C_InlineVarDefn (ty, name, e) -> Printf.sprintf "/*FIXME:inline var %s %s = */%s"
+                              (ctype_to_string ty)
+                              (Ident.unique_name name)
+                              (expression_to_string e)
     | C_Expression e -> (expression_to_string e) ^ ";"
     | C_VarDeclare (t,eid,e_option) ->
         (ctype_and_identifier_to_string t eid) ^
@@ -550,7 +558,7 @@ and lfunction_to_texpression env lam id params body =
     (* plain function *)
     let cty = C_FunPointer (ret_type, List.map fst typedparams) in
     VarLibrary.set_ctype cty id;
-    (cty, C_InlineFunDefn (ret_type, id, typedparams, cbody)), true
+    (cty, C_InlineRevStatements (cty, [C_Expression (C_Variable id); C_InlineFunDefn (ret_type, id, typedparams, cbody)])), true
 
   end else begin
     (* closure required *)
@@ -571,7 +579,7 @@ and tclosurify name_hint env_mapping ret_type typedparams cbody =
     match env_mapping with
     | [] -> failwith "tclosurify called with empty environment"
     | _ ->
-      let env_id = Ident.create "env" in
+      let env_id = Ident.create "__env" in
       let env_elt i = C_ArrayIndex (C_Variable env_id, C_IntLiteral (Int64.of_int i)) in
 
       let env_type = C_Pointer C_Boxed in
@@ -600,20 +608,23 @@ and tclosurify name_hint env_mapping ret_type typedparams cbody =
   VarLibrary.set_ctype (C_FunPointer (ret_type, List.map fst typedparams_fun)) id_fun;
 
   let closure_ctype = (C_FunPointer (ret_type, List.map fst typedparams)) in
-  let closure =
-    C_FunCall (C_GlobalVariable "ocaml_liballocs_close",
-      [ C_InlineFunDefn
+  let base_function =
+    C_InlineFunDefn
         ( ret_type
         , id_fun
         , typedparams_fun
         , cbody @ unenv_sl
         )
+  in
+  let closure =
+    C_FunCall (C_GlobalVariable "ocaml_liballocs_close",
+      [ C_Variable id_fun
       ; C_IntLiteral (Int64.of_int n_args)
       ; cast C_Boxed (env_type, env_value)
       ]
     )
   in
-  closure_ctype, C_InlineRevStatements (closure_ctype, C_Expression (closure) :: env_sl)
+  closure_ctype, C_InlineRevStatements (closure_ctype, C_Expression (closure) :: base_function :: env_sl)
 
 (* translate a function let-binding into (ret_type, typedparams, cbody) *)
 and let_function_to_rev_statements env (ret_type, typedparams) body =
@@ -992,10 +1003,13 @@ end
 module Fixup = struct
 
 type t =
-  { rev_deinlined_funs : toplevel list ref }
+  { rev_deinlined_funs : toplevel list ref
+  ; global_scope : bool (* true iff our current scope. this implies we are guaranteed to be executed at most once -- i.e. we are inside the module constructor, and not inside a function definition *)
+  }
 
-let new_state () =
-  { rev_deinlined_funs = ref [] }
+let new_state ~global_scope =
+  { rev_deinlined_funs = ref []
+  ; global_scope }
 
 let get_toplevels_from_state t =
   (* emit function declarations for each deinlined fun. then the definitions.
@@ -1011,6 +1025,7 @@ let get_toplevels_from_state t =
   deinlined_funs_decls @ (List.rev !(t.rev_deinlined_funs))
 
 let rec fixup_expression t accum e = (* sticks inlined statements on the front of accum *)
+  let tf = { t with global_scope = false } in
   match e with
   | C_InlineRevStatements (_, []) -> failwith "fixup_expression: invalid inlinerevstatements (empty)"
   | C_InlineRevStatements (_ctype, C_Expression e::sl) -> (* avoid creating a deinlined variable if we already have the expression *)
@@ -1023,33 +1038,29 @@ let rec fixup_expression t accum e = (* sticks inlined statements on the front o
       let sl' = fixup_rev_statements t ((C_VarDeclare (ctype, C_Variable id, None))::accum) sl in
       let sl'' = assign_last_value_of_statement (ctype,id) (ctype,sl') in
       sl'', C_Variable id
-  | C_InlineFunDefn (retty, name, args, sl) ->
-      let sl' = fixup_rev_statements t [] sl in
-      t.rev_deinlined_funs := (C_FunDefn (retty, C_Variable name, args, Some sl')) :: !(t.rev_deinlined_funs);
-      accum, C_Variable name
   | C_IntLiteral _ | C_FloatLiteral _ | C_PointerLiteral _ | C_StringLiteral _ | C_CharLiteral _
   | C_Variable _ | C_GlobalVariable _ | C_Allocate _ -> accum, e
   | C_Blob (s1,e,s2) ->
       let (accum', e') = fixup_expression t accum e in accum', C_Blob (s1,e',s2)
   | C_Field (e,f) ->
-      let (accum', e') = fixup_expression t accum e in accum', C_Field (e',f)
+      let (accum', e') = fixup_expression tf accum e in accum', C_Field (e',f)
   | C_ArrayIndex (e, i) ->
-      let (accum', e') = fixup_expression t accum e in
-      let (accum'', i') = fixup_expression t accum' i in
+      let (accum', e') = fixup_expression tf accum e in
+      let (accum'', i') = fixup_expression tf accum' i in
       accum'', C_ArrayIndex (e', i')
   | C_Cast (ty,e) ->
       let (accum', e') = fixup_expression t accum e in accum', C_Cast (ty,e')
   | C_UnaryOp (op,e) ->
-      let (accum', e') = fixup_expression t accum e in accum', C_UnaryOp (op,e')
+      let (accum', e') = fixup_expression tf accum e in accum', C_UnaryOp (op,e')
   | C_BinaryOp (op,e1,e2) ->
-      let (accum', e1') = fixup_expression t accum e1 in
-      let (accum'', e2') = fixup_expression t accum' e2 in
+      let (accum', e1') = fixup_expression tf accum e1 in
+      let (accum'', e2') = fixup_expression tf accum' e2 in
       accum'', C_BinaryOp (op,e1',e2')
   | C_InitialiserList es ->
       let rec loop accum es' = function
         | [] -> accum, List.rev es'
         | e::es ->
-            let (accum', e') = fixup_expression t accum e in
+            let (accum', e') = fixup_expression tf accum e in
             loop accum' (e'::es') es
       in
       let (accum', es') = loop accum [] es in
@@ -1058,30 +1069,43 @@ let rec fixup_expression t accum e = (* sticks inlined statements on the front o
       let rec loop accum es' = function
         | [] -> accum, List.rev es'
         | e::es ->
-            let (accum', e') = fixup_expression t accum e in
+            let (accum', e') = fixup_expression tf accum e in
             loop accum' (e'::es') es
       in
       let (accum', es') = loop accum [] es in
       accum', C_FunCall (id,es')
 
 and fixup_rev_statements t accum sl = (* sticks fixed up sl on the front of accum *)
+  let tf = { t with global_scope = false } in
   let rec loop_start accum xs = loop accum (List.rev xs)
   and loop accum = function
     | [] -> accum
     | s::statements ->
       let accum'' =
         match s with
+        | C_InlineFunDefn (retty, name, args, sl) ->
+            let sl' = fixup_rev_statements tf [] sl in
+            t.rev_deinlined_funs := (C_FunDefn (retty, C_Variable name, args, Some sl')) :: !(t.rev_deinlined_funs);
+            accum
+        | C_InlineVarDefn (ty, name, e) ->
+            let accum', e' = fixup_expression tf accum e in
+            if t.global_scope then (
+              t.rev_deinlined_funs := (C_GlobalDefn (ty, C_Variable name, None)) :: !(t.rev_deinlined_funs);
+              C_Assign (C_Variable name, e') :: accum'
+            ) else (
+              C_VarDeclare (ty, C_Variable name, Some e') :: accum'
+            )
         | C_Expression e -> let (accum', e') = fixup_expression t accum e in (C_Expression e') :: accum'
         | C_VarDeclare (ty,eid,None) -> C_VarDeclare (ty,eid,None) :: accum
-        | C_VarDeclare (ty,eid,Some e) -> let (accum', e') = fixup_expression t accum e in C_VarDeclare (ty,eid,Some e') :: accum'
-        | C_Assign (eid,e) -> let (accum', e') = fixup_expression t accum e in C_Assign (eid,e') :: accum'
-        | C_If (e,slt,slf) -> let (accum', e') = fixup_expression t accum e in (C_If (e', loop_start [] slt, loop_start [] slf)) :: accum'
-        | C_While (e,sl) -> let (accum', e') = fixup_expression t accum e in (C_While (e', loop_start [] sl)) :: accum'
+        | C_VarDeclare (ty,eid,Some e) -> let (accum', e') = fixup_expression tf accum e in C_VarDeclare (ty,eid,Some e') :: accum'
+        | C_Assign (eid,e) -> let (accum', e') = fixup_expression tf accum e in C_Assign (eid,e') :: accum'
+        | C_If (e,slt,slf) -> let (accum', e') = fixup_expression tf accum e in (C_If (e', loop_start [] slt, loop_start [] slf)) :: accum'
+        | C_While (e,sl) -> let (accum', e') = fixup_expression tf accum e in (C_While (e', loop_start [] sl)) :: accum'
         | C_ForInt (p,l,plim,h,d,sl) ->
-            let (accum', l') = fixup_expression t accum l in
-            let (accum'', h') = fixup_expression t accum' h in
+            let (accum', l') = fixup_expression tf accum l in
+            let (accum'', h') = fixup_expression tf accum' h in
             C_ForInt (p,l',plim,h',d, loop_start [] sl) :: accum''
-        | C_Return (Some e) -> let (accum', e') = fixup_expression t accum e in (C_Return (Some e')) :: accum'
+        | C_Return (Some e) -> let (accum', e') = fixup_expression tf accum e in (C_Return (Some e')) :: accum'
         | C_Return (None) | C_LabelDecl _ | C_LabelGoto _ ->
             s :: accum
       in
@@ -1112,11 +1136,14 @@ let compile_implementation modulename lambda =
     ])
   in
 
-  let rev_all_toplevels = the_module_constructor :: !Translate.rev_toplevels in
+  let rev_all_toplevels =
+    (true, the_module_constructor) ::
+      (List.map (fun x -> false, x) !Translate.rev_toplevels)
+  in
 
   let fixed_toplevels =
-    List.fold_left (fun accum toplevel ->
-      let fix_state = Fixup.new_state () in
+    List.fold_left (fun accum (global_scope, toplevel) ->
+      let fix_state = Fixup.new_state ~global_scope in
       let fixed_toplevel =
         map_toplevel (fun sl ->
           let fixed_sl = Fixup.fixup_rev_statements fix_state [] sl in
