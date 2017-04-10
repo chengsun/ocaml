@@ -99,8 +99,13 @@ module C = struct
     | C_CommentedType (t,_) -> canon_ctype t
     | t -> t
 
-  type expression =
+  type let_definition =
+    | FunDefn of ctype(*return*) * Ident.t(*name*) * (ctype * Ident.t) list * statement list
+    | VarDefn of ctype * Ident.t * expression (*definition*) * statement list (*post-initialisation*)
+
+  and expression =
     | C_Blob of (string * expression * string)
+    | C_LetExpression of let_definition
     | C_InlineRevStatements of ctype * statement list (* putting a statement where an expression belongs; this needs to be extracted in a later pass. ctype necessary annotation *)
     | C_IntLiteral of Int64.t
     | C_FloatLiteral of string
@@ -119,8 +124,7 @@ module C = struct
     | C_Allocate of ctype * int(*multiplier*) * (Types.type_expr, string) result (* for debugging only *)
 
   and statement =
-    | C_LetFunDefn of (ctype(*return*) * Ident.t(*name*) * (ctype * Ident.t) list * statement list) list
-    | C_LetVarDefn of (ctype * Ident.t * expression (*definition*) * statement list (*post-initialisation*)) list
+    | C_LetStatement of let_definition list (* allows recursive defns *)
     | C_Expression of expression
     | C_VarDeclare of ctype * expression * expression option
     | C_Assign of expression * expression
@@ -135,8 +139,7 @@ module C = struct
 
   (* just for debugging, nothing useful *)
   let statement_to_debug_string = function
-    | C_LetFunDefn _ -> "C_LetFunDefn"
-    | C_LetVarDefn _ -> "C_LetVarDefn"
+    | C_LetStatement _ -> "C_LetStatement"
     | C_Expression _ -> "C_Expression"
     | C_VarDeclare _ -> "C_VarDeclare"
     | C_Assign _ -> "C_Assign"
@@ -235,7 +238,7 @@ module C = struct
             f (C_PointerLiteral 0) :: s :: sl
         | C_VarDeclare (_, ((C_Variable _ | C_GlobalVariable _) as id), _) ->
             f id :: s :: sl
-        | C_VarDeclare _ | C_LetFunDefn _ | C_LetVarDefn _ | C_LabelDecl _ ->
+        | C_VarDeclare _ | C_LetStatement _ | C_LabelDecl _ ->
             failwith (Printf.sprintf "assign_last_value_of_statement: unexpected statement %s as last statement in sl" (statement_to_debug_string s))
       end
 
@@ -278,9 +281,24 @@ module Emitcode = struct
     | C_FunPointer (tyret, tyargs) -> Printf.sprintf "%s((*%s)(%s))" (ctype_to_string tyret) (expression_to_string id) (map_intersperse_concat ctype_to_string "," tyargs)
     | _ -> Printf.sprintf "%s %s" (ctype_to_string cty) (expression_to_string id)
 
+  and let_defn_to_string = function
+    | FunDefn (retty, name, args, sl) ->
+          Printf.sprintf "/*FIXME:fun %s %s (%s)*/{\n%s\n}"
+            (ctype_to_string retty)
+            (Ident.unique_name name)
+            (map_intersperse_concat (fun (t,id) -> (ctype_and_identifier_to_string t (C_Variable id))) ", " args)
+            (rev_statements_to_string sl)
+    | VarDefn (ty, name, e, sl) ->
+          Printf.sprintf "/*FIXME:var %s %s = */%s%s"
+            (ctype_to_string ty)
+            (Ident.unique_name name)
+            (expression_to_string e)
+            (match sl with [] -> "" | _ -> Printf.sprintf " /*THEN*/ {\n%s\n}" (rev_statements_to_string sl))
+
   and expression_to_string = function
     | C_Blob (s1, e, s2) -> Printf.sprintf "%s%s%s" s1 (expression_to_string e) s2
     | C_InlineRevStatements (cty, sl) -> Printf.sprintf "/*FIXME:inline %s*/{\n%s\n}" (ctype_to_string cty) (rev_statements_to_string sl)
+    | C_LetExpression ldef -> Printf.sprintf "{< %s >}" (let_defn_to_string ldef)
     | C_IntLiteral i -> Int64.to_string i
     | C_FloatLiteral f -> f
     | C_PointerLiteral i -> Printf.sprintf "((void*)%d)" i
@@ -306,22 +324,8 @@ module Emitcode = struct
     end
 
   and statement_to_string = function
-    | C_LetFunDefn defns ->
-        map_intersperse_concat (fun (retty, name, args, sl) ->
-          Printf.sprintf "/*FIXME:inline fun %s %s (%s)*/{\n%s\n}"
-            (ctype_to_string retty)
-            (Ident.unique_name name)
-            (map_intersperse_concat (fun (t,id) -> (ctype_and_identifier_to_string t (C_Variable id))) ", " args)
-            (rev_statements_to_string sl)
-        ) "\n/*AND*/\n" defns
-    | C_LetVarDefn defns ->
-        map_intersperse_concat (fun (ty, name, e, sl) ->
-          Printf.sprintf "/*FIXME:inline var %s %s = */%s%s"
-            (ctype_to_string ty)
-            (Ident.unique_name name)
-            (expression_to_string e)
-            (match sl with [] -> "" | _ -> Printf.sprintf " /*THEN*/ {\n%s\n}" (rev_statements_to_string sl))
-        ) "\n/*AND*/\n" defns
+    | C_LetStatement ldefs -> Printf.sprintf "{[ %s ]}"
+        (map_intersperse_concat let_defn_to_string "\n/*AND*/\n" ldefs)
     | C_Expression e -> (expression_to_string e) ^ ";"
     | C_VarDeclare (t,eid,e_option) ->
         (ctype_and_identifier_to_string t eid) ^
@@ -543,7 +547,7 @@ let rec let_to_rev_statements env id lam =
   | _ ->
     let ctype, defn = lambda_to_texpression env lam in
     VarLibrary.set_ctype ctype id;
-    [C_LetVarDefn [ctype, id, defn, []]]
+    [C_LetStatement [VarDefn (ctype, id, defn, [])]]
 
 and lfunction_to_tstatement env lam id params body =
   let ret_type, typedparams = get_function_type env params in
@@ -554,14 +558,14 @@ and lfunction_to_tstatement env lam id params body =
     (* plain function *)
     let cty = C_FunPointer (ret_type, List.map fst typedparams) in
     VarLibrary.set_ctype cty id;
-    (cty, C_LetFunDefn [ret_type, id, typedparams, cbody])
+    (cty, C_LetStatement [FunDefn (ret_type, id, typedparams, cbody)])
 
   end else begin
     (* closure required *)
     let fv_mapping = List.map (fun v -> (v, (VarLibrary.ctype v, C_Variable v))) fv in
     let cty, closure = tclosurify (Ident.name id) fv_mapping ret_type typedparams cbody in
     VarLibrary.set_ctype cty id;
-    (cty, C_LetVarDefn [cty, id, closure, []])
+    (cty, C_LetStatement [VarDefn (cty, id, closure, [])])
   end
 
 (* build a closure out of a base function's parts.
@@ -606,12 +610,7 @@ and tclosurify name_hint env_mapping ret_type typedparams cbody =
 
   let closure_ctype = (C_FunPointer (ret_type, List.map fst typedparams)) in
   let base_function =
-    C_LetFunDefn
-        [ ret_type
-        , id_fun
-        , typedparams_fun
-        , cbody @ unenv_sl
-        ]
+    C_LetStatement [FunDefn (ret_type, id_fun, typedparams_fun, cbody @ unenv_sl)]
   in
   let closure =
     C_FunCall (C_GlobalVariable "ocaml_liballocs_close",
@@ -734,11 +733,10 @@ and lambda_to_texpression env lam : C.texpression =
           in
           let postinit_sl = construct 0 [] contents in
           let block_type = C_Pointer C_Boxed in
-          block_type,
-          C_InlineRevStatements (block_type,
-            [C_LetVarDefn [block_type, id,
-                           do_allocation (List.length contents) tyinfo,
-                           postinit_sl]])
+          block_type, C_LetExpression (
+            VarDefn (block_type, id,
+                     do_allocation (List.length contents) tyinfo,
+                     postinit_sl))
       | Psequand, [e1;e2] -> bool_bop "&&" e1 e2
       | Psequor, [e1;e2] -> bool_bop "||" e1 e2
       | Paddint, [e1;e2] -> int_bop "+" e1 e2
@@ -951,7 +949,7 @@ let rec let_to_module_constructor_sl env id lam =
       let ret_type, typedparams = get_function_type env params in
       let cbody = let_function_to_rev_statements env (ret_type, typedparams) body in
       VarLibrary.set_ctype (C_FunPointer (ret_type, List.map fst typedparams)) id;
-      [C_LetFunDefn [ret_type, id, typedparams, cbody]]
+      [C_LetStatement [FunDefn (ret_type, id, typedparams, cbody)]]
   | _ ->
       let_to_rev_statements env id lam
 
@@ -1009,9 +1007,31 @@ let get_toplevels_from_state t =
   in
   deinlined_funs_decls @ (List.rev !(t.rev_deinlined_funs))
 
-let rec fixup_expression t accum e = (* sticks inlined statements on the front of accum *)
+let rec fixup_let_def t accum ldef =
+  let tf = { t with global_scope = false } in
+  match ldef with
+  | FunDefn (retty, name, args, sl) ->
+    let sl' = fixup_rev_statements tf [] sl in
+    t.rev_deinlined_funs := (C_FunDefn (retty, C_Variable name, args, Some sl')) :: !(t.rev_deinlined_funs);
+    accum, C_Variable name
+  | VarDefn (ty, name, e, sl) ->
+    let accum', e' = fixup_expression tf accum e in
+    let accum'' =
+      if t.global_scope then (
+        t.rev_deinlined_funs := (C_GlobalDefn (ty, C_Variable name, None)) :: !(t.rev_deinlined_funs);
+        C_Assign (C_Variable name, e') :: accum'
+      ) else (
+        C_VarDeclare (ty, C_Variable name, Some e') :: accum'
+      )
+    in
+    fixup_rev_statements tf accum'' sl, C_Variable name
+
+and fixup_expression t accum e = (* sticks inlined statements on the front of accum *)
   let tf = { t with global_scope = false } in
   match e with
+  | C_LetExpression ldef ->
+      let (accum', e_var) = fixup_let_def t accum ldef in
+      (accum', e_var)
   | C_InlineRevStatements (_, []) -> failwith "fixup_expression: invalid inlinerevstatements (empty)"
   | C_InlineRevStatements (_ctype, C_Expression e::sl) -> (* avoid creating a deinlined variable if we already have the expression *)
       (* NB: order matters! *)
@@ -1067,23 +1087,11 @@ and fixup_rev_statements t accum sl = (* sticks fixed up sl on the front of accu
     | s::statements ->
       let accum'' =
         match s with
-        | C_LetFunDefn [retty, name, args, sl] ->
-            let sl' = fixup_rev_statements tf [] sl in
-            t.rev_deinlined_funs := (C_FunDefn (retty, C_Variable name, args, Some sl')) :: !(t.rev_deinlined_funs);
-            accum
-        | C_LetVarDefn [ty, name, e, sl] ->
-            let accum', e' = fixup_expression tf accum e in
-            let accum'' =
-              if t.global_scope then (
-                t.rev_deinlined_funs := (C_GlobalDefn (ty, C_Variable name, None)) :: !(t.rev_deinlined_funs);
-                C_Assign (C_Variable name, e') :: accum'
-              ) else (
-                C_VarDeclare (ty, C_Variable name, Some e') :: accum'
-              )
-            in
-            fixup_rev_statements tf accum'' sl
-        | C_LetFunDefn _ | C_LetVarDefn _ ->
-            failwith "fixup_rev_statements: MUTUAL RECURSION UNIMPLEMENTED"
+        | C_LetStatement [] -> failwith "empty C_LetStatement"
+        | C_LetStatement [ldef] ->
+            let accum', e_var = fixup_let_def t accum ldef in
+            accum'
+        | C_LetStatement _ -> failwith "fixup_rev_statements: MUTUAL RECURSION UNIMPLEMENTED"
         | C_Expression e -> let (accum', e') = fixup_expression t accum e in (C_Expression e') :: accum'
         | C_VarDeclare (ty,eid,None) -> C_VarDeclare (ty,eid,None) :: accum
         | C_VarDeclare (ty,eid,Some e) -> let (accum', e') = fixup_expression tf accum e in C_VarDeclare (ty,eid,Some e') :: accum'
