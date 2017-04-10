@@ -120,7 +120,7 @@ module C = struct
 
   and statement =
     | C_InlineFunDefn of (ctype(*return*) * Ident.t(*name*) * (ctype * Ident.t) list * statement list) list
-    | C_InlineVarDefn of (ctype * Ident.t * expression) list
+    | C_InlineVarDefn of (ctype * Ident.t * expression (*definition*) * statement list (*post-initialisation*)) list
     | C_Expression of expression
     | C_VarDeclare of ctype * expression * expression option
     | C_Assign of expression * expression
@@ -314,11 +314,12 @@ module Emitcode = struct
             (rev_statements_to_string sl)
         ) "\n/*AND*/\n" defns
     | C_InlineVarDefn defns ->
-        map_intersperse_concat (fun (ty, name, e) ->
-          Printf.sprintf "/*FIXME:inline var %s %s = */%s"
+        map_intersperse_concat (fun (ty, name, e, sl) ->
+          Printf.sprintf "/*FIXME:inline var %s %s = */%s%s"
             (ctype_to_string ty)
             (Ident.unique_name name)
             (expression_to_string e)
+            (match sl with [] -> "" | _ -> Printf.sprintf " /*THEN*/ {\n%s\n}" (rev_statements_to_string sl))
         ) "\n/*AND*/\n" defns
     | C_Expression e -> (expression_to_string e) ^ ";"
     | C_VarDeclare (t,eid,e_option) ->
@@ -542,13 +543,13 @@ let rec let_to_rev_statements env id lam =
       [C_Expression expr]
     end else begin
       VarLibrary.set_ctype cty id;
-      [C_InlineVarDefn [cty, id, expr]]
+      [C_InlineVarDefn [cty, id, expr, []]]
     end
 
   | _ ->
     let ctype, defn = lambda_to_texpression env lam in
     VarLibrary.set_ctype ctype id;
-    [C_InlineVarDefn [ctype, id, defn]]
+    [C_InlineVarDefn [ctype, id, defn, []]]
 
 (* returns (cty, expr), globally_accessible
  * where globally_accessible=true means no variable should be defined to bind the resulting expression as the function is globally accessible *)
@@ -1080,13 +1081,13 @@ and fixup_rev_statements t accum sl = (* sticks fixed up sl on the front of accu
             let sl' = fixup_rev_statements tf [] sl in
             t.rev_deinlined_funs := (C_FunDefn (retty, C_Variable name, args, Some sl')) :: !(t.rev_deinlined_funs);
             accum
-        | C_InlineVarDefn [ty, name, e] ->
+        | C_InlineVarDefn [ty, name, e, sl] ->
             let accum', e' = fixup_expression tf accum e in
             if t.global_scope then (
               t.rev_deinlined_funs := (C_GlobalDefn (ty, C_Variable name, None)) :: !(t.rev_deinlined_funs);
-              C_Assign (C_Variable name, e') :: accum'
+              sl @ C_Assign (C_Variable name, e') :: accum'
             ) else (
-              C_VarDeclare (ty, C_Variable name, Some e') :: accum'
+              sl @ C_VarDeclare (ty, C_Variable name, Some e') :: accum'
             )
         | C_InlineFunDefn _ | C_InlineVarDefn _ ->
             failwith "fixup_rev_statements: MUTUAL RECURSION UNIMPLEMENTED"
