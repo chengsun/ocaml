@@ -233,7 +233,7 @@ module C = struct
         | C_While _ | C_ForInt _ ->
             (* we know these always come from Lwhile/Lfor imperative constructs, which have type unit. hence this is safe to do: *)
             f (C_PointerLiteral 0) :: s :: sl
-        | C_VarDeclare (_, ((C_Variable _ | C_GlobalVariable _) as id), _) -> (* not actually sure where these come from? *)
+        | C_VarDeclare (_, ((C_Variable _ | C_GlobalVariable _) as id), _) ->
             f id :: s :: sl
         | C_VarDeclare _ | C_LetFunDefn _ | C_LetVarDefn _ | C_LabelDecl _ ->
             failwith (Printf.sprintf "assign_last_value_of_statement: unexpected statement %s as last statement in sl" (statement_to_debug_string s))
@@ -725,19 +725,20 @@ and lambda_to_texpression env lam : C.texpression =
           let id = Ident.create "__makeblock" in
           let var = C_Variable id in
           let rec construct k statements = function
-            | [] -> (C_Expression var) :: statements
+            | [] -> statements
             | e_head::el ->
                 let texpr = lambda_to_texpression env e_head in
                 let elem = C_ArrayIndex (var, C_IntLiteral (Int64.of_int k)) in
                 let assign = C_Assign (elem, cast C_Boxed texpr) in
                 construct (succ k) (assign::statements) el
           in
+          let postinit_sl = construct 0 [] contents in
           let block_type = C_Pointer C_Boxed in
           block_type,
-          C_InlineRevStatements (block_type, construct 0 [
-              C_VarDeclare (block_type, C_Variable id,
-                            Some (do_allocation (List.length contents) tyinfo))
-            ] contents)
+          C_InlineRevStatements (block_type,
+            [C_LetVarDefn [block_type, id,
+                           do_allocation (List.length contents) tyinfo,
+                           postinit_sl]])
       | Psequand, [e1;e2] -> bool_bop "&&" e1 e2
       | Psequor, [e1;e2] -> bool_bop "||" e1 e2
       | Paddint, [e1;e2] -> int_bop "+" e1 e2
@@ -1072,12 +1073,15 @@ and fixup_rev_statements t accum sl = (* sticks fixed up sl on the front of accu
             accum
         | C_LetVarDefn [ty, name, e, sl] ->
             let accum', e' = fixup_expression tf accum e in
-            if t.global_scope then (
-              t.rev_deinlined_funs := (C_GlobalDefn (ty, C_Variable name, None)) :: !(t.rev_deinlined_funs);
-              sl @ C_Assign (C_Variable name, e') :: accum'
-            ) else (
-              sl @ C_VarDeclare (ty, C_Variable name, Some e') :: accum'
-            )
+            let accum'' =
+              if t.global_scope then (
+                t.rev_deinlined_funs := (C_GlobalDefn (ty, C_Variable name, None)) :: !(t.rev_deinlined_funs);
+                C_Assign (C_Variable name, e') :: accum'
+              ) else (
+                C_VarDeclare (ty, C_Variable name, Some e') :: accum'
+              )
+            in
+            fixup_rev_statements tf accum'' sl
         | C_LetFunDefn _ | C_LetVarDefn _ ->
             failwith "fixup_rev_statements: MUTUAL RECURSION UNIMPLEMENTED"
         | C_Expression e -> let (accum', e') = fixup_expression t accum e in (C_Expression e') :: accum'
