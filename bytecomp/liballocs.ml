@@ -711,9 +711,7 @@ and lambda_to_texpression env lam : C.texpression =
               ; C_Expression (C_FunCall (C_GlobalVariable (module_initialiser_name (Ident.name id)), []))])
           end
       | Popaque, [lam] ->
-          (* TODO: can't this be handled recursively? *)
-          let ctype, rev_st = lambda_to_trev_statements env lam in
-          ctype, C_InlineRevStatements (ctype, rev_st)
+          lambda_to_texpression env lam
       | Pgetglobal id, [] ->
           VarLibrary.ctype id, C_GlobalVariable (Ident.name id)
       | Pfield i, [lam] ->
