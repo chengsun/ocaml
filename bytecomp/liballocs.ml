@@ -232,9 +232,10 @@ module C = struct
         | C_Return _ | C_LabelGoto _ -> s :: sl (* the requested assignment doesn't matter, we're gone! *)
         | C_While _ | C_ForInt _ ->
             (* we know these always come from Lwhile/Lfor imperative constructs, which have type unit. hence this is safe to do: *)
-            f (C_PointerLiteral 0):: s :: sl
-        | C_LetFunDefn _ | C_LetVarDefn _
-        | C_VarDeclare _ | C_LabelDecl _ ->
+            f (C_PointerLiteral 0) :: s :: sl
+        | C_VarDeclare (_, ((C_Variable _ | C_GlobalVariable _) as id), _) -> (* not actually sure where these come from? *)
+            f id :: s :: sl
+        | C_VarDeclare _ | C_LetFunDefn _ | C_LetVarDefn _ | C_LabelDecl _ ->
             failwith (Printf.sprintf "assign_last_value_of_statement: unexpected statement %s as last statement in sl" (statement_to_debug_string s))
       end
 
@@ -1113,6 +1114,8 @@ let compile_implementation modulename lambda =
       Translate.lambda_to_module_constructor_sl module_export_var Env.empty lam
     | lam -> failwith ("compile_implementation unexpected root: " ^ (formats Printlambda.lambda lam))
   in
+
+  (* Printf.printf "### CODE PRE-FIXUP: ###\n\n%s\n\n###\n" (Emitcode.rev_statements_to_string module_constructor_sl); *)
 
   let fix_state = Fixup.new_state ~global_scope:true in
   let fixed_module_constructor_sl = Fixup.fixup_rev_statements fix_state [] module_constructor_sl in
