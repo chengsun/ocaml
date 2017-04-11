@@ -1,0 +1,20 @@
+- choice of IR
+- C AST
+- translation
+    - typing
+        - Pmakeblock enhancement
+        - typed expressions during translation
+- fixup
+    - inline statements
+    - let statements/expressions (global vs local)
+    - mutual recursion (post-init statements)
+- standard library
+- closures
+    - three cases: named, anonymous lambda, partial application
+    - (mutually) recursive closures:
+        - extending environment mapping with closure itself
+- performance
+    - optimisation: more efficient ocaml_liballocs_close ("closure-optimisation" branch)
+    - optimisation: closure with single-fv doesn't allocate environment ("elide-singleton-env" branch)
+    - optimisation: recursive closure full self-application elides reference to self in environment
+    - evaluate bump allocator instead of malloc
