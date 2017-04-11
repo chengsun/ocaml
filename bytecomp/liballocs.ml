@@ -563,13 +563,13 @@ let get_function_type params =
 
 (* translate a let* to a variable or function declaration. [id] can be used to refer
  * to this let binding after the statements this returns *)
-let rec let_to_rev_statements id lam =
+let rec let_to_definition id lam =
   match lam with
   | Levent (body, ev) ->
-    let_to_rev_statements id body
+    let_to_definition id body
   | Lfunction { params ; body } ->
     let cty, ldef = lfunction_to_letdefinition lam id params body in
-    [C_LetStatement [ldef]]
+    ldef
   | Lprim (Pmakeblock (tag, mut, tyinfo), contents) ->
     (* TODO: dedup? *)
     let actual_ctype = VarLibrary.ctype varlib_events id in
@@ -585,15 +585,13 @@ let rec let_to_rev_statements id lam =
     in
     let postinit_sl = construct 0 [] contents in
     VarLibrary.set_ctype varlib (C_Pointer actual_ctype) id;
-    [C_LetStatement [
-      VarDefn (C_Pointer actual_ctype, id,
-               do_allocation (List.length contents) tyinfo,
-               postinit_sl)]
-    ]
+    VarDefn (C_Pointer actual_ctype, id,
+             do_allocation (List.length contents) tyinfo,
+             postinit_sl)
   | _ ->
     let cty, expr = lambda_to_texpression lam in
     VarLibrary.set_ctype varlib cty id;
-    [C_LetStatement [VarDefn (cty, id, expr, [])]]
+    VarDefn (cty, id, expr, [])
 
 and lfunction_to_letdefinition lam id params body =
   let ret_type, typedparams = get_function_type params in
@@ -897,14 +895,14 @@ and lambda_to_trev_statements lam =
       ctype, [C_Expression cexpr]
   | Llet (_strict, id, args, body) ->
       (* NB: order of execution of the next two lines matter! *)
-      let let_statements = let_to_rev_statements id args in
+      let ldefn = let_to_definition id args in
       let ctype, rev_st = lambda_to_trev_statements body in
-      ctype, rev_st @ let_statements
+      ctype, rev_st @ [C_LetStatement [ldefn]]
   | Lletrec ([id, args], body) ->
       (* NB: order of execution of the next two lines matter! *)
-      let let_statements = let_to_rev_statements id args in
+      let ldefn = let_to_definition id args in
       let ctype, rev_st = lambda_to_trev_statements body in
-      ctype, rev_st @ let_statements
+      ctype, rev_st @ [C_LetStatement [ldefn]]
   | Lsequence (l1, l2) ->
       let _ctype1, rev_st1 = lambda_to_trev_statements l1 in
       let ctype2, rev_st2 = lambda_to_trev_statements l2 in
@@ -983,19 +981,19 @@ and lambda_to_trev_statements lam =
 
 (* The reason toplevels are handled separately is because we want each toplevel let-binding to be transformed into a *global*,
  * so that they are subsequently accessible throughout. *)
-let rec let_to_module_constructor_sl id lam =
+let rec module_constructor_let_to_defn id lam =
   match lam with
   | Levent (body, ev) ->
-      let_to_module_constructor_sl id body
+      module_constructor_let_to_defn id body
   | Lfunction { params ; body } ->
-      (* note that here, unlike in let_to_rev_statements, we do not check for closures
+      (* note that here, unlike in let_to_definition, we do not check for closures
        * because all free variables would be referring to globals *)
       let ret_type, typedparams = get_function_type params in
       let cbody = let_function_to_rev_statements (ret_type, typedparams) body in
       VarLibrary.set_ctype varlib (C_FunPointer (ret_type, List.map fst typedparams)) id;
-      [C_LetStatement [FunDefn (ret_type, id, typedparams, cbody)]]
+      FunDefn (ret_type, id, typedparams, cbody)
   | _ ->
-      let_to_rev_statements id lam
+      let_to_definition id lam
 
 (* entry point: translates the root lambda into a statement list for the module constructor. *)
 let rec lambda_to_module_constructor_sl export_var lam =
@@ -1004,14 +1002,14 @@ let rec lambda_to_module_constructor_sl export_var lam =
       lambda_to_module_constructor_sl export_var body
   | Llet (_strict, id, args, body) ->
       (* evaluation order important for type propagation *)
-      let a = let_to_module_constructor_sl id args in
+      let a = module_constructor_let_to_defn id args in
       let b = lambda_to_module_constructor_sl export_var body in
-      b @ a
+      b @ [C_LetStatement [a]]
   | Lletrec ([id, args], body) ->
       (* evaluation order important for type propagation *)
-      let a = let_to_module_constructor_sl id args in
+      let a = module_constructor_let_to_defn id args in
       let b = lambda_to_module_constructor_sl export_var body in
-      b @ a
+      b @ [C_LetStatement [a]]
   | Lsequence (l1, l2) -> (* let () = l1;; l2 *)
       let cbody1 = snd (lambda_to_trev_statements l1) in
       let cbody2 = lambda_to_module_constructor_sl export_var l2 in
