@@ -563,12 +563,12 @@ let get_function_type params =
 
 (* translate a let* to a variable or function declaration. [id] can be used to refer
  * to this let binding after the statements this returns *)
-let rec let_to_definition id lam =
+let rec let_to_definition ?(ignore_fvs=false) id lam =
   match lam with
   | Levent (body, ev) ->
     let_to_definition id body
   | Lfunction { params ; body } ->
-    let cty, ldef = lfunction_to_letdefinition lam id params body in
+    let cty, ldef = lfunction_to_letdefinition ~ignore_fvs lam id params body in
     ldef
   | Lprim (Pmakeblock (tag, mut, tyinfo), contents) ->
     (* TODO: dedup? *)
@@ -593,12 +593,12 @@ let rec let_to_definition id lam =
     VarLibrary.set_ctype varlib cty id;
     VarDefn (cty, id, expr, [])
 
-and lfunction_to_letdefinition lam id params body =
+and lfunction_to_letdefinition ?(ignore_fvs=false) lam id params body =
   let ret_type, typedparams = get_function_type params in
   let cbody = let_function_to_rev_statements (ret_type, typedparams) body in
   let fv = IdentSet.elements (free_variables (Lletrec([id, lam], lambda_unit))) in
 
-  if fv = [] then begin
+  if ignore_fvs || fv = [] then begin
     (* plain function *)
     let cty = C_FunPointer (ret_type, List.map fst typedparams) in
     VarLibrary.set_ctype varlib cty id;
@@ -979,22 +979,6 @@ and lambda_to_trev_statements lam =
   | lam -> failwith ("lambda_to_trev_statements " ^ (formats Printlambda.lambda lam))
 
 
-(* The reason toplevels are handled separately is because we want each toplevel let-binding to be transformed into a *global*,
- * so that they are subsequently accessible throughout. *)
-let rec module_constructor_let_to_defn id lam =
-  match lam with
-  | Levent (body, ev) ->
-      module_constructor_let_to_defn id body
-  | Lfunction { params ; body } ->
-      (* note that here, unlike in let_to_definition, we do not check for closures
-       * because all free variables would be referring to globals *)
-      let ret_type, typedparams = get_function_type params in
-      let cbody = let_function_to_rev_statements (ret_type, typedparams) body in
-      VarLibrary.set_ctype varlib (C_FunPointer (ret_type, List.map fst typedparams)) id;
-      FunDefn (ret_type, id, typedparams, cbody)
-  | _ ->
-      let_to_definition id lam
-
 (* entry point: translates the root lambda into a statement list for the module constructor. *)
 let rec lambda_to_module_constructor_sl export_var lam =
   match lam with
@@ -1002,12 +986,14 @@ let rec lambda_to_module_constructor_sl export_var lam =
       lambda_to_module_constructor_sl export_var body
   | Llet (_strict, id, args, body) ->
       (* evaluation order important for type propagation *)
-      let a = module_constructor_let_to_defn id args in
+      let a = let_to_definition ~ignore_fvs:true id args in
       let b = lambda_to_module_constructor_sl export_var body in
       b @ [C_LetStatement [a]]
   | Lletrec ([id, args], body) ->
       (* evaluation order important for type propagation *)
-      let a = module_constructor_let_to_defn id args in
+      (* we ignore fvs so that toplevel functions that refer to toplevel
+       * globals don't get defined as closures *)
+      let a = let_to_definition ~ignore_fvs:true id args in
       let b = lambda_to_module_constructor_sl export_var body in
       b @ [C_LetStatement [a]]
   | Lsequence (l1, l2) -> (* let () = l1;; l2 *)
