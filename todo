@@ -1,0 +1,62 @@
+DONE:
+defined C ast
+defined union: function pointers are not same as data pointers in C
+postproc to remove inline statements
+  - multistate translation
+  - assignment of last expr of inline statement
+rewritten structured_constant
+added some mappings from ocaml types to c types (using info in pmakeblock)
+figure out semantics of Lstaticraise and Lstaticcatch from test programs (when can catch ids be reused?) as well as a bunch of other lambda expressions...
+added exception handling using setjmp
+added closure creation
+ordered types according to declaration
+
+
+PROBLEMS:
+untyped lambda is untyped
+    - have to annotate Pmakeblock
+
+
+
+TODO:
+- add support for typetranslating VARIANTS
+- retrieve function argument types from Levent
+- lambda_to_texpression Lprim Popaque seems to use an irrelevant inlinerevstatements
+- annotate Pmakearray(Pgenarray(...))
+- annotate Const_int (e.g. transl_exp0 Texp_variant)
+- add more types in ocaml_to_c_type (think about how bool fits in 64 bits for example)
+- "let rec and" is unsupported...
+- translate Pmakeblocks into explicit structs where we have the data
+
+
+
+INFO:
+
+two ways we can create a closure
+1) "fun" lambda
+2) internal let
+3) partial application
+
+
+a lambda primitive is {PIdentity, Prev/dirapply, Pget/setglobal, Pmakeblock, P(set)field, Paddint,..}
+
+
+parsetree -> typedtree -bytecomp/translcore> lambda -bytecomp/bytegen> bytecode
+
+typing/types.mli: [type_desc] is a type descriptor,
+                  [type_expr] uses this to express existing types (+level of polymorphism, id).
+                  [value_description] uses this to describe values (+kind, loc, Parsetree.attributes).
+typing/typedtree.mli: expression_desc Texp_ident describes x, M.x, with value_description
+parsing/asttypes.mli [Asttypes.constant] used by parsetree and typedtree
+
+        structured_constant in parsetree rejected proposal https://caml.inria.fr/mantis/view.php?id=6751
+
+bytecomp/lambda.mli: [Pmakeblock]
+
+>>> hack in type info into Pmakeblock <<<
+
+want to type makeblock and structured_constant
+might want separate pass to destructure structured_constants into pmakeblock's
+flambda's middle_end/closure_conversion.ml [eliminate_const_block] might have stuff for that
+
+just look up how flambda uses Levent
