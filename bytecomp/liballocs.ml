@@ -568,8 +568,8 @@ let rec let_to_rev_statements id lam =
   | Levent (body, ev) ->
     let_to_rev_statements id body
   | Lfunction { params ; body } ->
-    let cty, st = lfunction_to_tstatement lam id params body in
-    [st]
+    let cty, ldef = lfunction_to_letdefinition lam id params body in
+    [C_LetStatement [ldef]]
   | Lprim (Pmakeblock (tag, mut, tyinfo), contents) ->
     (* TODO: dedup? *)
     let actual_ctype = VarLibrary.ctype varlib_events id in
@@ -595,7 +595,7 @@ let rec let_to_rev_statements id lam =
     VarLibrary.set_ctype varlib cty id;
     [C_LetStatement [VarDefn (cty, id, expr, [])]]
 
-and lfunction_to_tstatement lam id params body =
+and lfunction_to_letdefinition lam id params body =
   let ret_type, typedparams = get_function_type params in
   let cbody = let_function_to_rev_statements (ret_type, typedparams) body in
   let fv = IdentSet.elements (free_variables (Lletrec([id, lam], lambda_unit))) in
@@ -604,14 +604,14 @@ and lfunction_to_tstatement lam id params body =
     (* plain function *)
     let cty = C_FunPointer (ret_type, List.map fst typedparams) in
     VarLibrary.set_ctype varlib cty id;
-    (cty, C_LetStatement [FunDefn (ret_type, id, typedparams, cbody)])
+    (cty, FunDefn (ret_type, id, typedparams, cbody))
 
   end else begin
     (* closure required *)
     let fv_mapping = List.map (fun v -> (v, (VarLibrary.ctype varlib v, C_Variable v))) fv in
     let cty, closure = tclosurify (Ident.name id) fv_mapping ret_type typedparams cbody in
     VarLibrary.set_ctype varlib cty id;
-    (cty, C_LetStatement [VarDefn (cty, id, closure, [])])
+    (cty, VarDefn (cty, id, closure, []))
   end
 
 (* build a closure out of a base function's parts.
@@ -823,8 +823,8 @@ and lambda_to_texpression lam : C.texpression =
   | Lvar id -> VarLibrary.ctype varlib id, C_Variable id
   | Lfunction { params ; body } ->
     let id = Ident.create "__lambda" in
-    let cty, st = lfunction_to_tstatement lam id params body in
-    cty, C_InlineRevStatements (cty, [st])
+    let cty, ldef = lfunction_to_letdefinition lam id params body in
+    cty, C_LetExpression ldef
   | Lapply { ap_func = e_id ; ap_args } ->
     let vararg =
       (* FIXME: hardcoded for printf *)
