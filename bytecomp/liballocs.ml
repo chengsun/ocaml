@@ -16,11 +16,12 @@ let list_splitat n l =
   in
   loop [] l n
 
-let rec list_drop n l =
-  match n, l with
-  | 0, _ -> l
-  | _, (x::xs) -> list_drop (pred n) xs
-  | _ -> failwith "list_drop: exceeded list length"
+let rec list_partition_map f l =
+  List.fold_left (fun (l,r) x ->
+    match f x with
+    | `Left x ->  (x::l), r
+    | `Right x -> l, (x::r)
+  ) ([],[]) (List.rev l)
 
 let map_intersperse_concat f sep xs =
   let rec loop accum = function
@@ -96,8 +97,8 @@ module C = struct
     | t -> t
 
   type let_definition =
-    | FunDefn of ctype(*return*) * Ident.t(*name*) * (ctype * Ident.t) list * statement list
-    | VarDefn of ctype * Ident.t * expression (*definition*) * statement list (*post-initialisation*)
+    | FunDefn of (ctype(*return*) * Ident.t(*name*) * (ctype * Ident.t) list * statement list)
+    | VarDefn of (ctype * Ident.t * expression (*definition*) * statement list (*post-initialisation*))
 
   and expression =
     | C_Blob of (string * expression * string)
@@ -132,6 +133,10 @@ module C = struct
     | C_LabelGoto of string
 
   and texpression = ctype * expression
+
+  let let_definition_ident = function
+    | FunDefn (_, name, _, _) -> name
+    | VarDefn (_, name, _, _) -> name
 
   (* just for debugging, nothing useful *)
   let statement_to_debug_string = function
@@ -1044,31 +1049,47 @@ let get_toplevels_from_state t =
   in
   deinlined_funs_decls @ (List.rev !(t.rev_deinlined_funs))
 
-let rec fixup_let_def t accum ldef =
+let rec fixup_let_defs t accum ldefs =
   let tf = { t with global_scope = false } in
-  match ldef with
-  | FunDefn (retty, name, args, sl) ->
+  let vardefs, fundefs =
+    list_partition_map (function
+      | VarDefn x -> `Left x
+      | FunDefn x -> `Right x) ldefs
+  in
+
+  (* fun defns *)
+  List.iter (fun (retty, name, args, sl) ->
     let sl' = fixup_rev_statements tf [] sl in
     t.rev_deinlined_funs := (C_FunDefn (retty, C_Variable name, args, Some sl')) :: !(t.rev_deinlined_funs);
-    accum, C_Variable name
-  | VarDefn (ty, name, e, sl) ->
-    let accum', e' = fixup_expression tf accum e in
-    let accum'' =
+  ) fundefs;
+
+  (* var decls *)
+  let accum =
+    List.fold_left (fun accum (ty, name, e, sl) ->
+      let accum', e' = fixup_expression tf accum e in
       if t.global_scope then (
         t.rev_deinlined_funs := (C_GlobalDefn (ty, C_Variable name, None)) :: !(t.rev_deinlined_funs);
         C_Assign (C_Variable name, e') :: accum'
       ) else (
         C_VarDeclare (ty, C_Variable name, Some e') :: accum'
       )
-    in
-    fixup_rev_statements tf accum'' sl, C_Variable name
+    ) accum vardefs
+  in
+
+  (* var postinits *)
+  let accum =
+    List.fold_left (fun accum (ty, name, e, sl) ->
+      fixup_rev_statements tf accum sl
+    ) accum vardefs
+  in
+  accum
 
 and fixup_expression t accum e = (* sticks inlined statements on the front of accum *)
   let tf = { t with global_scope = false } in
   match e with
   | C_LetExpression ldef ->
-      let (accum', e_var) = fixup_let_def t accum ldef in
-      (accum', e_var)
+      let accum' = fixup_let_defs t accum [ldef] in
+      (accum', C_Variable (let_definition_ident ldef))
   | C_InlineRevStatements (_, []) -> failwith "fixup_expression: invalid inlinerevstatements (empty)"
   | C_InlineRevStatements (_ctype, C_Expression e::sl) -> (* avoid creating a deinlined variable if we already have the expression *)
       (* NB: order matters! *)
@@ -1125,10 +1146,8 @@ and fixup_rev_statements t accum sl = (* sticks fixed up sl on the front of accu
       let accum'' =
         match s with
         | C_LetStatement [] -> failwith "empty C_LetStatement"
-        | C_LetStatement [ldef] ->
-            let accum', e_var = fixup_let_def t accum ldef in
-            accum'
-        | C_LetStatement _ -> failwith "fixup_rev_statements: MUTUAL RECURSION UNIMPLEMENTED"
+        | C_LetStatement ldefs ->
+            fixup_let_defs t accum ldefs
         | C_Expression e -> let (accum', e') = fixup_expression t accum e in (C_Expression e') :: accum'
         | C_VarDeclare (ty,eid,None) -> C_VarDeclare (ty,eid,None) :: accum
         | C_VarDeclare (ty,eid,Some e) -> let (accum', e') = fixup_expression tf accum e in C_VarDeclare (ty,eid,Some e') :: accum'
