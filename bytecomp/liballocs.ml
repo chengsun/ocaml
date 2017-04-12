@@ -498,6 +498,15 @@ module VarLibrary = struct
       VarHash.add t id ctype
     )
 
+  let set_or_get_ctype t ctype id =
+    try
+      VarHash.find t id
+    with Not_found -> (
+      Printf.printf "setting type of %s to %s\n" (Ident.unique_name id) (ctype_to_string ctype);
+      VarHash.add t id ctype;
+      ctype
+    )
+
   let create t ctype name =
     let id = Ident.create name in
     Printf.printf "creating %s with type %s\n" (Ident.unique_name id) (ctype_to_string ctype);
@@ -573,8 +582,25 @@ let get_function_type params =
   let ret_type = C_Boxed in
   ret_type, typedparams
 
+(* gets a valid type that lam could be put into.
+ * not as precise as just letting let_to_definition use the resulting ctype
+ * of the defining expression, but necessary for predefining types
+ * for mutually recursive values *)
+let rec letdecl_ctype lam =
+  match lam with
+  | Levent (body, ev) ->
+    letdecl_ctype body
+  | Lfunction { params } ->
+    let ret_type, typedparams = get_function_type params in
+    C_FunPointer (ret_type, List.map fst typedparams)
+  | Lprim (Pmakeblock _, _) ->
+    C_Pointer C_Boxed
+  | _ ->
+    C_Boxed
+
 (* translate a let* to a variable or function declaration. [id] can be used to refer
- * to this let binding after the statements this returns *)
+ * to this let binding after the statements this returns.
+ * this function defines the ctype of [id], or uses the previously used ctype if predeclared (mutually recursive defns need this) *)
 let rec let_to_definition ?(at_root=false) id lam =
   match lam with
   | Levent (body, ev) ->
@@ -584,7 +610,8 @@ let rec let_to_definition ?(at_root=false) id lam =
     ldef
   | Lprim (Pmakeblock (tag, mut, tyinfo), contents) ->
     (* TODO: dedup? *)
-    let actual_ctype = VarLibrary.ctype varlib_events id in
+    (* the point of doing this here is because all(?) "value let rec"s are
+     * Pmakeblocks, and we need their VarDefn's postinits populated correctly *)
     let var = C_Variable id in
     let rec construct k statements = function
       | [] -> statements
@@ -596,16 +623,23 @@ let rec let_to_definition ?(at_root=false) id lam =
           construct (succ k) (assign::statements) el
     in
     let postinit_sl = construct 0 [] contents in
-    VarLibrary.set_ctype varlib (C_Pointer actual_ctype) id;
-    VarDefn (C_Pointer actual_ctype, id,
-             do_allocation (List.length contents) tyinfo,
+    let block_type = C_Pointer C_Boxed in
+    let gotten_ctype = VarLibrary.set_or_get_ctype varlib block_type id in
+    VarDefn (gotten_ctype, id,
+             cast gotten_ctype (block_type, do_allocation (List.length contents) tyinfo),
              postinit_sl)
   | _ ->
+    let cty, expr = lambda_to_texpression lam in
+    let gotten_ctype = VarLibrary.set_or_get_ctype varlib cty id in
+    VarDefn (gotten_ctype, id, cast gotten_ctype (cty, expr), [])
+      (*
     let actual_ctype = VarLibrary.ctype varlib_events id in
     let cty, expr = lambda_to_texpression lam in
     VarLibrary.set_ctype varlib actual_ctype id;
     VarDefn (actual_ctype, id, cast actual_ctype (cty, expr), [])
+    *)
 
+(* this function defines the ctype of [id]. *)
 and lfunction_to_letdefinition ?(at_root=false) lam id params body =
   let ret_type, typedparams = get_function_type params in
   let cbody = let_function_to_rev_statements (ret_type, typedparams) body in
@@ -912,6 +946,11 @@ and lambda_to_trev_statements lam =
       let ctype, rev_st = lambda_to_trev_statements body in
       ctype, rev_st @ [C_LetStatement [ldefn]]
   | Lletrec (id_args_list, body) ->
+      (* predeclare ctypes *)
+      List.iter (fun (id, args) ->
+        let ctype = letdecl_ctype args in
+        VarLibrary.set_ctype varlib ctype id
+      ) id_args_list;
       (* NB: order of execution of the next two lines matter! *)
       let ldefns = List.map (fun (id, args) -> let_to_definition id args) id_args_list in
       let ctype, rev_st = lambda_to_trev_statements body in
@@ -1003,6 +1042,11 @@ let rec lambda_to_module_constructor_sl export_var lam =
       let b = lambda_to_module_constructor_sl export_var body in
       b @ [C_LetStatement [letdefns]]
   | Lletrec (id_args_list, body) ->
+      (* predeclare ctypes *)
+      List.iter (fun (id, args) ->
+        let ctype = letdecl_ctype args in
+        VarLibrary.set_ctype varlib ctype id
+      ) id_args_list;
       (* evaluation order important for type propagation *)
       (* we declare at_root so that toplevel functions that refer to toplevel
        * globals don't get defined as closures *)
