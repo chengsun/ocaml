@@ -14,6 +14,7 @@ let list_splitat n l =
     | _, (x::xs) -> loop (x::acc) xs (pred n)
     | _, [] -> failwith "list_splitat: exceeded list length"
   in
+  assert (n >= 0);
   loop [] l n
 
 let rec list_partition_map f l =
@@ -425,10 +426,21 @@ module TypeLibrary = struct
           (tfield_to_list ts)
     | _ -> failwith "unexpected type_expr to add mapping for"
 
+
+  and ocaml_tarrow_to_c_type accum type_expr =
+    match type_expr.desc with
+    | Tarrow (_label, t1, t2, _commutable) ->
+        (* don't want this for now because of risk of passing/returning non-qword sized args (structs) *)
+        (* ocaml_tarrow_to_c_type ((ocaml_to_c_type t1) :: accum) t2 *)
+        ocaml_tarrow_to_c_type (C_Boxed :: accum) t2
+    | _ ->
+        (* C_FunPointer (ocaml_to_c_type type_expr, List.rev accum) *)
+        C_FunPointer (C_Boxed, List.rev accum)
+
   and ocaml_to_c_type type_expr =
     match type_expr.desc with
     | Tvar _ -> C_Boxed
-    | Tarrow _ -> C_FunPointer (C_Void, []) (* TODO: could add more detail *)
+    | Tarrow _ -> ocaml_tarrow_to_c_type [] type_expr
     | Tconstr (path, [], _) when path = Predef.path_int -> C_Int
     | Tconstr (path, [], _) when path = Predef.path_string -> C_Pointer C_Char
     | Tconstr (path, [], _) when path = Predef.path_float -> C_Double
@@ -589,9 +601,10 @@ let rec let_to_definition ?(at_root=false) id lam =
              do_allocation (List.length contents) tyinfo,
              postinit_sl)
   | _ ->
+    let actual_ctype = VarLibrary.ctype varlib_events id in
     let cty, expr = lambda_to_texpression lam in
-    VarLibrary.set_ctype varlib cty id;
-    VarDefn (cty, id, expr, [])
+    VarLibrary.set_ctype varlib actual_ctype id;
+    VarDefn (actual_ctype, id, cast actual_ctype (cty, expr), [])
 
 and lfunction_to_letdefinition ?(at_root=false) lam id params body =
   let ret_type, typedparams = get_function_type params in
