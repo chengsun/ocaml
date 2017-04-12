@@ -8,10 +8,6 @@ TESTS=${1-`cd tests; ls -1 *.ml`}
 for ml in $TESTS; do
     name=${ml%.ml}
 
-    if [[ "$name" = "test_closure_letrec" ]]; then
-        continue
-    fi
-
     echo ">>> Testing ${name}..."
     cp ./tests/${name}.ml /tmp/test.ml
     OCAMLRUNPARAM=b ./ocamlc -target-liballocs -o /dev/null -g /tmp/test.ml

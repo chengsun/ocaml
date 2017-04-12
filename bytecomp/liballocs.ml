@@ -103,7 +103,7 @@ module C = struct
 
   and expression =
     | C_Blob of (string * expression * string)
-    | C_LetExpression of let_definition
+    | C_LetExpression of let_definition list (* the LAST definition is the result of the expression *)
     | C_InlineRevStatements of ctype * statement list (* putting a statement where an expression belongs; this needs to be extracted in a later pass. ctype necessary annotation *)
     | C_IntLiteral of Int64.t
     | C_FloatLiteral of string
@@ -300,7 +300,8 @@ module Emitcode = struct
   and expression_to_string = function
     | C_Blob (s1, e, s2) -> Printf.sprintf "%s%s%s" s1 (expression_to_string e) s2
     | C_InlineRevStatements (cty, sl) -> Printf.sprintf "/*FIXME:inline %s*/{\n%s\n}" (ctype_to_string cty) (rev_statements_to_string sl)
-    | C_LetExpression ldef -> Printf.sprintf "{< %s >}" (let_defn_to_string ldef)
+    | C_LetExpression ldefs -> Printf.sprintf "{< %s >}"
+        (map_intersperse_concat let_defn_to_string "\n/*AND*/\n" ldefs)
     | C_IntLiteral i -> Int64.to_string i
     | C_FloatLiteral f -> f
     | C_PointerLiteral i -> Printf.sprintf "((void*)%d)" i
@@ -583,7 +584,7 @@ let get_function_type params =
   ret_type, typedparams
 
 (* gets a valid type that lam could be put into.
- * not as precise as just letting let_to_definition use the resulting ctype
+ * not as precise as just letting let_to_definitions use the resulting ctype
  * of the defining expression, but necessary for predefining types
  * for mutually recursive values *)
 let rec letdecl_ctype lam =
@@ -601,13 +602,13 @@ let rec letdecl_ctype lam =
 (* translate a let* to a variable or function declaration. [id] can be used to refer
  * to this let binding after the statements this returns.
  * this function defines the ctype of [id], or uses the previously used ctype if predeclared (mutually recursive defns need this) *)
-let rec let_to_definition ?(at_root=false) id lam =
+let rec let_to_definitions ?(at_root=false) id lam =
   match lam with
   | Levent (body, ev) ->
-    let_to_definition id body
+    let_to_definitions id body
   | Lfunction { params ; body } ->
-    let cty, ldef = lfunction_to_letdefinition ~at_root lam id params body in
-    ldef
+    let cty, ldefs = lfunction_to_letdefinitions ~at_root lam id params body in
+    ldefs
   | Lprim (Pmakeblock (tag, mut, tyinfo), contents) ->
     (* TODO: dedup? *)
     (* the point of doing this here is because all(?) "value let rec"s are
@@ -625,13 +626,15 @@ let rec let_to_definition ?(at_root=false) id lam =
     let postinit_sl = construct 0 [] contents in
     let block_type = C_Pointer C_Boxed in
     let gotten_ctype = VarLibrary.set_or_get_ctype varlib block_type id in
-    VarDefn (gotten_ctype, id,
+    [ VarDefn (gotten_ctype, id,
              cast gotten_ctype (block_type, do_allocation (List.length contents) tyinfo),
              postinit_sl)
+    ]
   | _ ->
     let cty, expr = lambda_to_texpression lam in
     let gotten_ctype = VarLibrary.set_or_get_ctype varlib cty id in
-    VarDefn (gotten_ctype, id, cast gotten_ctype (cty, expr), [])
+    [ VarDefn (gotten_ctype, id, cast gotten_ctype (cty, expr), [])
+    ]
       (*
     let actual_ctype = VarLibrary.ctype varlib_events id in
     let cty, expr = lambda_to_texpression lam in
@@ -640,39 +643,35 @@ let rec let_to_definition ?(at_root=false) id lam =
     *)
 
 (* this function defines the ctype of [id]. *)
-and lfunction_to_letdefinition ?(at_root=false) lam id params body =
+and lfunction_to_letdefinitions ?(at_root=false) lam id params body =
   let ret_type, typedparams = get_function_type params in
   let cbody = let_function_to_rev_statements (ret_type, typedparams) body in
-  let fv =
-    (* Not the following, because that doesn't count self as free *)
-    (* IdentSet.elements (free_variables (Lletrec([id, lam], lambda_unit))) *)
-    IdentSet.elements (free_variables lam)
-  in
+  let fv = IdentSet.elements (free_variables lam) in
 
   if at_root || fv = [] then begin
     (* plain function *)
     let cty = C_FunPointer (ret_type, List.map fst typedparams) in
     VarLibrary.set_ctype varlib cty id;
-    (cty, FunDefn (ret_type, id, typedparams, cbody))
+    (cty, [FunDefn (ret_type, id, typedparams, cbody)])
 
   end else begin
     (* closure required *)
     let fv_mapping = List.map (fun v -> (v, (VarLibrary.ctype varlib v, C_Variable v))) fv in
-    let cty, closure = tclosurify (Ident.name id) fv_mapping ret_type typedparams cbody in
+    let ldefns_prelim, (cty, closure) = tclosurify (Ident.name id) fv_mapping ret_type typedparams cbody in
     VarLibrary.set_ctype varlib cty id;
-    (cty, VarDefn (cty, id, closure, []))
+    (cty, ldefns_prelim @ [VarDefn (cty, id, closure, [])])
   end
 
-(* build a closure out of a base function's parts.
+(* build a closure out of a base function's parts. returns (defns, texpr) where defns are additional let_definitions required to be able to use the closure, and texpr is the expression where the closure is accessible
  * [env_mapping] specifies a mapping of (Ident.t * texpression) which represent variables in the environment, which cbody will have access to.
- * note that tclosurify will NOT check for recursive calls to the function being defined -- that needs to have been handled in lfunction_to_letdefinition already
+ * note that tclosurify will NOT check for recursive calls to the function being defined -- that needs to have been handled in lfunction_to_letdefinitions already
  * *)
 and tclosurify name_hint env_mapping ret_type typedparams cbody =
   let id_fun = Ident.create ("__closure_" ^ name_hint) in (* the ID of the closure base function *)
 
   let env_mapping = List.mapi (fun i (fv_id,fv_tvalue) -> (i, (fv_id,fv_tvalue))) env_mapping in
 
-  let env_type, env_id, env_value, env_sl, unenv_sl =
+  let env_type, env_id, env_value, env_sl_letdefn, unenv_sl =
     match env_mapping with
     | [] -> failwith "tclosurify called with empty environment"
     | _ ->
@@ -680,22 +679,23 @@ and tclosurify name_hint env_mapping ret_type typedparams cbody =
       let env_elt i = C_ArrayIndex (C_Variable env_id, C_IntLiteral (Int64.of_int i)) in
 
       let env_type = C_Pointer C_Boxed in
-      let env_sl =
-        [ C_VarDeclare (
-          env_type,
-          C_Variable env_id,
-          Some (C_Allocate (C_Boxed, List.length env_mapping, Error "tclosurify environment"))
-        )]
-      in
-      let env_sl = List.fold_left (fun sl (i, (_fv_id, fv_tvalue)) ->
+      let env_sl_post = List.fold_left (fun sl (i, (_fv_id, fv_tvalue)) ->
         C_Assign (env_elt i, cast C_Boxed fv_tvalue) :: sl
-      ) env_sl env_mapping in
+      ) [] env_mapping in
+      let env_sl_letdefn =
+        VarDefn (
+          env_type,
+          env_id,
+          C_Allocate (C_Boxed, List.length env_mapping, Error "tclosurify environment"),
+          env_sl_post
+        )
+      in
 
       let unenv_sl = List.fold_left (fun sl (i, (fv_id, (fv_ty, _))) ->
         C_VarDeclare (fv_ty, C_Variable fv_id, Some (cast fv_ty (C_Boxed, env_elt i))) :: sl
       ) [] env_mapping in
 
-      (env_type, env_id, C_Variable env_id, env_sl, unenv_sl)
+      (env_type, env_id, C_Variable env_id, env_sl_letdefn, unenv_sl)
   in
 
   let n_args = List.length typedparams in
@@ -706,7 +706,7 @@ and tclosurify name_hint env_mapping ret_type typedparams cbody =
 
   let closure_ctype = (C_FunPointer (ret_type, List.map fst typedparams)) in
   let base_function =
-    C_LetStatement [FunDefn (ret_type, id_fun, typedparams_fun, cbody @ unenv_sl)]
+    FunDefn (ret_type, id_fun, typedparams_fun, cbody @ unenv_sl)
   in
   let closure =
     C_FunCall (C_GlobalVariable "ocaml_liballocs_close",
@@ -716,7 +716,7 @@ and tclosurify name_hint env_mapping ret_type typedparams cbody =
       ]
     )
   in
-  closure_ctype, C_InlineRevStatements (closure_ctype, C_Expression (closure) :: base_function :: env_sl)
+  [base_function ; env_sl_letdefn], (closure_ctype, closure)
 
 (* translate a function let-binding into (ret_type, typedparams, cbody) *)
 and let_function_to_rev_statements (ret_type, typedparams) body =
@@ -829,10 +829,10 @@ and lambda_to_texpression lam : C.texpression =
           in
           let postinit_sl = construct 0 [] contents in
           let block_type = C_Pointer C_Boxed in
-          block_type, C_LetExpression (
+          block_type, C_LetExpression [
             VarDefn (block_type, id,
                      do_allocation (List.length contents) tyinfo,
-                     postinit_sl))
+                     postinit_sl)]
       | Psequand, [e1;e2] -> bool_bop "&&" e1 e2
       | Psequor, [e1;e2] -> bool_bop "||" e1 e2
       | Paddint, [e1;e2] -> int_bop "+" e1 e2
@@ -873,8 +873,8 @@ and lambda_to_texpression lam : C.texpression =
   | Lvar id -> VarLibrary.ctype varlib id, C_Variable id
   | Lfunction { params ; body } ->
     let id = Ident.create "__lambda" in
-    let cty, ldef = lfunction_to_letdefinition lam id params body in
-    cty, C_LetExpression ldef
+    let cty, ldefs = lfunction_to_letdefinitions lam id params body in
+    cty, C_LetExpression ldefs
   | Lapply { ap_func = e_id ; ap_args } ->
     let vararg =
       (* FIXME: hardcoded for printf *)
@@ -925,7 +925,12 @@ and lambda_to_texpression lam : C.texpression =
           arg_ctypes_and_ids_env texpr_ap_args
       in
       let cbody = [ C_Return (Some (C_FunCall (c_ap_func, List.map (fun (_, id) -> C_Variable id) arg_ctypes_and_ids))) ] in
-      tclosurify "_partialapp" env_mapping ret_ctype arg_ctypes_and_ids_params cbody
+      let letdefs_prelim, (ctype, closure_expr) =
+        tclosurify "_partialapp" env_mapping ret_ctype arg_ctypes_and_ids_params cbody
+      in
+      ctype, C_InlineRevStatements (ctype, [
+        C_Expression closure_expr ; C_LetStatement letdefs_prelim
+      ])
     end
   | _ ->
     (* fall back to trying full blown statements *)
@@ -947,9 +952,9 @@ and lambda_to_trev_statements lam =
       ctype, [C_Expression cexpr]
   | Llet (_strict, id, args, body) ->
       (* NB: order of execution of the next two lines matter! *)
-      let ldefn = let_to_definition id args in
+      let ldefns = let_to_definitions id args in
       let ctype, rev_st = lambda_to_trev_statements body in
-      ctype, rev_st @ [C_LetStatement [ldefn]]
+      ctype, rev_st @ [C_LetStatement ldefns]
   | Lletrec (id_args_list, body) ->
       (* predeclare ctypes *)
       List.iter (fun (id, args) ->
@@ -957,7 +962,7 @@ and lambda_to_trev_statements lam =
         VarLibrary.set_ctype varlib ctype id
       ) id_args_list;
       (* NB: order of execution of the next two lines matter! *)
-      let ldefns = List.map (fun (id, args) -> let_to_definition id args) id_args_list in
+      let ldefns = List.concat (List.map (fun (id, args) -> let_to_definitions id args) id_args_list) in
       let ctype, rev_st = lambda_to_trev_statements body in
       ctype, rev_st @ [C_LetStatement ldefns]
   | Lsequence (l1, l2) ->
@@ -1043,9 +1048,9 @@ let rec lambda_to_module_constructor_sl export_var lam =
       lambda_to_module_constructor_sl export_var body
   | Llet (_strict, id, args, body) ->
       (* evaluation order important for type propagation *)
-      let letdefns = let_to_definition ~at_root:true id args in
+      let letdefns = let_to_definitions ~at_root:true id args in
       let b = lambda_to_module_constructor_sl export_var body in
-      b @ [C_LetStatement [letdefns]]
+      b @ [C_LetStatement letdefns]
   | Lletrec (id_args_list, body) ->
       (* predeclare ctypes *)
       List.iter (fun (id, args) ->
@@ -1055,7 +1060,7 @@ let rec lambda_to_module_constructor_sl export_var lam =
       (* evaluation order important for type propagation *)
       (* we declare at_root so that toplevel functions that refer to toplevel
        * globals don't get defined as closures *)
-      let letdefns = List.map (fun (id, args) -> let_to_definition ~at_root:true id args) id_args_list in
+      let letdefns = List.concat (List.map (fun (id, args) -> let_to_definitions ~at_root:true id args) id_args_list) in
       let b = lambda_to_module_constructor_sl export_var body in
       b @ [C_LetStatement letdefns]
   | Lsequence (l1, l2) -> (* let () = l1;; l2 *)
@@ -1133,9 +1138,9 @@ let rec fixup_let_defs t accum ldefs =
 and fixup_expression t accum e = (* sticks inlined statements on the front of accum *)
   let tf = { t with global_scope = false } in
   match e with
-  | C_LetExpression ldef ->
-      let accum' = fixup_let_defs t accum [ldef] in
-      (accum', C_Variable (let_definition_ident ldef))
+  | C_LetExpression ldefs ->
+      let accum' = fixup_let_defs t accum ldefs in
+      (accum', C_Variable (let_definition_ident (List.hd (List.rev ldefs))))
   | C_InlineRevStatements (_, []) -> failwith "fixup_expression: invalid inlinerevstatements (empty)"
   | C_InlineRevStatements (_ctype, C_Expression e::sl) -> (* avoid creating a deinlined variable if we already have the expression *)
       (* NB: order matters! *)
