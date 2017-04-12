@@ -671,7 +671,7 @@ and tclosurify name_hint env_mapping ret_type typedparams cbody =
 
   let env_mapping = List.mapi (fun i (fv_id,fv_tvalue) -> (i, (fv_id,fv_tvalue))) env_mapping in
 
-  let env_type, env_id, env_value, env_sl_letdefn, unenv_sl =
+  let env_type, env_id, env_value, env_sl_letdefns, unenv_sl =
     match env_mapping with
     | [] -> failwith "tclosurify called with empty environment"
     | _ ->
@@ -695,7 +695,7 @@ and tclosurify name_hint env_mapping ret_type typedparams cbody =
         C_VarDeclare (fv_ty, C_Variable fv_id, Some (cast fv_ty (C_Boxed, env_elt i))) :: sl
       ) [] env_mapping in
 
-      (env_type, env_id, C_Variable env_id, env_sl_letdefn, unenv_sl)
+      (env_type, env_id, C_Variable env_id, [env_sl_letdefn], unenv_sl)
   in
 
   let n_args = List.length typedparams in
@@ -716,7 +716,7 @@ and tclosurify name_hint env_mapping ret_type typedparams cbody =
       ]
     )
   in
-  [base_function ; env_sl_letdefn], (closure_ctype, closure)
+  (base_function :: env_sl_letdefns), (closure_ctype, closure)
 
 (* translate a function let-binding into (ret_type, typedparams, cbody) *)
 and let_function_to_rev_statements (ret_type, typedparams) body =
