@@ -14,13 +14,15 @@ let list_splitat n l =
     | _, (x::xs) -> loop (x::acc) xs (pred n)
     | _, [] -> failwith "list_splitat: exceeded list length"
   in
+  assert (n >= 0);
   loop [] l n
 
-let rec list_drop n l =
-  match n, l with
-  | 0, _ -> l
-  | _, (x::xs) -> list_drop (pred n) xs
-  | _ -> failwith "list_drop: exceeded list length"
+let rec list_partition_map f l =
+  List.fold_left (fun (l,r) x ->
+    match f x with
+    | `Left x ->  (x::l), r
+    | `Right x -> l, (x::r)
+  ) ([],[]) (List.rev l)
 
 let map_intersperse_concat f sep xs =
   let rec loop accum = function
@@ -96,8 +98,8 @@ module C = struct
     | t -> t
 
   type let_definition =
-    | FunDefn of ctype(*return*) * Ident.t(*name*) * (ctype * Ident.t) list * statement list
-    | VarDefn of ctype * Ident.t * expression (*definition*) * statement list (*post-initialisation*)
+    | FunDefn of (ctype(*return*) * Ident.t(*name*) * (ctype * Ident.t) list * statement list)
+    | VarDefn of (ctype * Ident.t * expression (*definition*) * statement list (*post-initialisation*))
 
   and expression =
     | C_Blob of (string * expression * string)
@@ -132,6 +134,10 @@ module C = struct
     | C_LabelGoto of string
 
   and texpression = ctype * expression
+
+  let let_definition_ident = function
+    | FunDefn (_, name, _, _) -> name
+    | VarDefn (_, name, _, _) -> name
 
   (* just for debugging, nothing useful *)
   let statement_to_debug_string = function
@@ -420,10 +426,21 @@ module TypeLibrary = struct
           (tfield_to_list ts)
     | _ -> failwith "unexpected type_expr to add mapping for"
 
+
+  and ocaml_tarrow_to_c_type accum type_expr =
+    match type_expr.desc with
+    | Tarrow (_label, t1, t2, _commutable) ->
+        (* don't want this for now because of risk of passing/returning non-qword sized args (structs) *)
+        (* ocaml_tarrow_to_c_type ((ocaml_to_c_type t1) :: accum) t2 *)
+        ocaml_tarrow_to_c_type (C_Boxed :: accum) t2
+    | _ ->
+        (* C_FunPointer (ocaml_to_c_type type_expr, List.rev accum) *)
+        C_FunPointer (C_Boxed, List.rev accum)
+
   and ocaml_to_c_type type_expr =
     match type_expr.desc with
     | Tvar _ -> C_Boxed
-    | Tarrow _ -> C_FunPointer (C_Void, []) (* TODO: could add more detail *)
+    | Tarrow _ -> ocaml_tarrow_to_c_type [] type_expr
     | Tconstr (path, [], _) when path = Predef.path_int -> C_Int
     | Tconstr (path, [], _) when path = Predef.path_string -> C_Pointer C_Char
     | Tconstr (path, [], _) when path = Predef.path_float -> C_Double
@@ -479,6 +496,15 @@ module VarLibrary = struct
     with Not_found -> (
       Printf.printf "setting type of %s to %s\n" (Ident.unique_name id) (ctype_to_string ctype);
       VarHash.add t id ctype
+    )
+
+  let set_or_get_ctype t ctype id =
+    try
+      VarHash.find t id
+    with Not_found -> (
+      Printf.printf "setting type of %s to %s\n" (Ident.unique_name id) (ctype_to_string ctype);
+      VarHash.add t id ctype;
+      ctype
     )
 
   let create t ctype name =
@@ -556,18 +582,36 @@ let get_function_type params =
   let ret_type = C_Boxed in
   ret_type, typedparams
 
-(* translate a let* to a variable or function declaration. [id] can be used to refer
- * to this let binding after the statements this returns *)
-let rec let_to_rev_statements id lam =
+(* gets a valid type that lam could be put into.
+ * not as precise as just letting let_to_definition use the resulting ctype
+ * of the defining expression, but necessary for predefining types
+ * for mutually recursive values *)
+let rec letdecl_ctype lam =
   match lam with
   | Levent (body, ev) ->
-    let_to_rev_statements id body
+    letdecl_ctype body
+  | Lfunction { params } ->
+    let ret_type, typedparams = get_function_type params in
+    C_FunPointer (ret_type, List.map fst typedparams)
+  | Lprim (Pmakeblock _, _) ->
+    C_Pointer C_Boxed
+  | _ ->
+    C_Boxed
+
+(* translate a let* to a variable or function declaration. [id] can be used to refer
+ * to this let binding after the statements this returns.
+ * this function defines the ctype of [id], or uses the previously used ctype if predeclared (mutually recursive defns need this) *)
+let rec let_to_definition ?(at_root=false) id lam =
+  match lam with
+  | Levent (body, ev) ->
+    let_to_definition id body
   | Lfunction { params ; body } ->
-    let cty, st = lfunction_to_tstatement lam id params body in
-    [st]
+    let cty, ldef = lfunction_to_letdefinition ~at_root lam id params body in
+    ldef
   | Lprim (Pmakeblock (tag, mut, tyinfo), contents) ->
     (* TODO: dedup? *)
-    let actual_ctype = VarLibrary.ctype varlib_events id in
+    (* the point of doing this here is because all(?) "value let rec"s are
+     * Pmakeblocks, and we need their VarDefn's postinits populated correctly *)
     let var = C_Variable id in
     let rec construct k statements = function
       | [] -> statements
@@ -579,34 +623,40 @@ let rec let_to_rev_statements id lam =
           construct (succ k) (assign::statements) el
     in
     let postinit_sl = construct 0 [] contents in
-    VarLibrary.set_ctype varlib (C_Pointer actual_ctype) id;
-    [C_LetStatement [
-      VarDefn (C_Pointer actual_ctype, id,
-               do_allocation (List.length contents) tyinfo,
-               postinit_sl)]
-    ]
+    let block_type = C_Pointer C_Boxed in
+    let gotten_ctype = VarLibrary.set_or_get_ctype varlib block_type id in
+    VarDefn (gotten_ctype, id,
+             cast gotten_ctype (block_type, do_allocation (List.length contents) tyinfo),
+             postinit_sl)
   | _ ->
     let cty, expr = lambda_to_texpression lam in
-    VarLibrary.set_ctype varlib cty id;
-    [C_LetStatement [VarDefn (cty, id, expr, [])]]
+    let gotten_ctype = VarLibrary.set_or_get_ctype varlib cty id in
+    VarDefn (gotten_ctype, id, cast gotten_ctype (cty, expr), [])
+      (*
+    let actual_ctype = VarLibrary.ctype varlib_events id in
+    let cty, expr = lambda_to_texpression lam in
+    VarLibrary.set_ctype varlib actual_ctype id;
+    VarDefn (actual_ctype, id, cast actual_ctype (cty, expr), [])
+    *)
 
-and lfunction_to_tstatement lam id params body =
+(* this function defines the ctype of [id]. *)
+and lfunction_to_letdefinition ?(at_root=false) lam id params body =
   let ret_type, typedparams = get_function_type params in
   let cbody = let_function_to_rev_statements (ret_type, typedparams) body in
   let fv = IdentSet.elements (free_variables (Lletrec([id, lam], lambda_unit))) in
 
-  if fv = [] then begin
+  if at_root || fv = [] then begin
     (* plain function *)
     let cty = C_FunPointer (ret_type, List.map fst typedparams) in
     VarLibrary.set_ctype varlib cty id;
-    (cty, C_LetStatement [FunDefn (ret_type, id, typedparams, cbody)])
+    (cty, FunDefn (ret_type, id, typedparams, cbody))
 
   end else begin
     (* closure required *)
     let fv_mapping = List.map (fun v -> (v, (VarLibrary.ctype varlib v, C_Variable v))) fv in
     let cty, closure = tclosurify (Ident.name id) fv_mapping ret_type typedparams cbody in
     VarLibrary.set_ctype varlib cty id;
-    (cty, C_LetStatement [VarDefn (cty, id, closure, [])])
+    (cty, VarDefn (cty, id, closure, []))
   end
 
 (* build a closure out of a base function's parts.
@@ -818,8 +868,8 @@ and lambda_to_texpression lam : C.texpression =
   | Lvar id -> VarLibrary.ctype varlib id, C_Variable id
   | Lfunction { params ; body } ->
     let id = Ident.create "__lambda" in
-    let cty, st = lfunction_to_tstatement lam id params body in
-    cty, C_InlineRevStatements (cty, [st])
+    let cty, ldef = lfunction_to_letdefinition lam id params body in
+    cty, C_LetExpression ldef
   | Lapply { ap_func = e_id ; ap_args } ->
     let vararg =
       (* FIXME: hardcoded for printf *)
@@ -892,14 +942,19 @@ and lambda_to_trev_statements lam =
       ctype, [C_Expression cexpr]
   | Llet (_strict, id, args, body) ->
       (* NB: order of execution of the next two lines matter! *)
-      let let_statements = let_to_rev_statements id args in
+      let ldefn = let_to_definition id args in
       let ctype, rev_st = lambda_to_trev_statements body in
-      ctype, rev_st @ let_statements
-  | Lletrec ([id, args], body) ->
+      ctype, rev_st @ [C_LetStatement [ldefn]]
+  | Lletrec (id_args_list, body) ->
+      (* predeclare ctypes *)
+      List.iter (fun (id, args) ->
+        let ctype = letdecl_ctype args in
+        VarLibrary.set_ctype varlib ctype id
+      ) id_args_list;
       (* NB: order of execution of the next two lines matter! *)
-      let let_statements = let_to_rev_statements id args in
+      let ldefns = List.map (fun (id, args) -> let_to_definition id args) id_args_list in
       let ctype, rev_st = lambda_to_trev_statements body in
-      ctype, rev_st @ let_statements
+      ctype, rev_st @ [C_LetStatement ldefns]
   | Lsequence (l1, l2) ->
       let _ctype1, rev_st1 = lambda_to_trev_statements l1 in
       let ctype2, rev_st2 = lambda_to_trev_statements l2 in
@@ -976,22 +1031,6 @@ and lambda_to_trev_statements lam =
   | lam -> failwith ("lambda_to_trev_statements " ^ (formats Printlambda.lambda lam))
 
 
-(* The reason toplevels are handled separately is because we want each toplevel let-binding to be transformed into a *global*,
- * so that they are subsequently accessible throughout. *)
-let rec let_to_module_constructor_sl id lam =
-  match lam with
-  | Levent (body, ev) ->
-      let_to_module_constructor_sl id body
-  | Lfunction { params ; body } ->
-      (* note that here, unlike in let_to_rev_statements, we do not check for closures
-       * because all free variables would be referring to globals *)
-      let ret_type, typedparams = get_function_type params in
-      let cbody = let_function_to_rev_statements (ret_type, typedparams) body in
-      VarLibrary.set_ctype varlib (C_FunPointer (ret_type, List.map fst typedparams)) id;
-      [C_LetStatement [FunDefn (ret_type, id, typedparams, cbody)]]
-  | _ ->
-      let_to_rev_statements id lam
-
 (* entry point: translates the root lambda into a statement list for the module constructor. *)
 let rec lambda_to_module_constructor_sl export_var lam =
   match lam with
@@ -999,14 +1038,21 @@ let rec lambda_to_module_constructor_sl export_var lam =
       lambda_to_module_constructor_sl export_var body
   | Llet (_strict, id, args, body) ->
       (* evaluation order important for type propagation *)
-      let a = let_to_module_constructor_sl id args in
+      let letdefns = let_to_definition ~at_root:true id args in
       let b = lambda_to_module_constructor_sl export_var body in
-      b @ a
-  | Lletrec ([id, args], body) ->
+      b @ [C_LetStatement [letdefns]]
+  | Lletrec (id_args_list, body) ->
+      (* predeclare ctypes *)
+      List.iter (fun (id, args) ->
+        let ctype = letdecl_ctype args in
+        VarLibrary.set_ctype varlib ctype id
+      ) id_args_list;
       (* evaluation order important for type propagation *)
-      let a = let_to_module_constructor_sl id args in
+      (* we declare at_root so that toplevel functions that refer to toplevel
+       * globals don't get defined as closures *)
+      let letdefns = List.map (fun (id, args) -> let_to_definition ~at_root:true id args) id_args_list in
       let b = lambda_to_module_constructor_sl export_var body in
-      b @ a
+      b @ [C_LetStatement letdefns]
   | Lsequence (l1, l2) -> (* let () = l1;; l2 *)
       let cbody1 = snd (lambda_to_trev_statements l1) in
       let cbody2 = lambda_to_module_constructor_sl export_var l2 in
@@ -1044,31 +1090,47 @@ let get_toplevels_from_state t =
   in
   deinlined_funs_decls @ (List.rev !(t.rev_deinlined_funs))
 
-let rec fixup_let_def t accum ldef =
+let rec fixup_let_defs t accum ldefs =
   let tf = { t with global_scope = false } in
-  match ldef with
-  | FunDefn (retty, name, args, sl) ->
+  let vardefs, fundefs =
+    list_partition_map (function
+      | VarDefn x -> `Left x
+      | FunDefn x -> `Right x) ldefs
+  in
+
+  (* fun defns *)
+  List.iter (fun (retty, name, args, sl) ->
     let sl' = fixup_rev_statements tf [] sl in
     t.rev_deinlined_funs := (C_FunDefn (retty, C_Variable name, args, Some sl')) :: !(t.rev_deinlined_funs);
-    accum, C_Variable name
-  | VarDefn (ty, name, e, sl) ->
-    let accum', e' = fixup_expression tf accum e in
-    let accum'' =
+  ) fundefs;
+
+  (* var decls *)
+  let accum =
+    List.fold_left (fun accum (ty, name, e, sl) ->
+      let accum', e' = fixup_expression tf accum e in
       if t.global_scope then (
         t.rev_deinlined_funs := (C_GlobalDefn (ty, C_Variable name, None)) :: !(t.rev_deinlined_funs);
         C_Assign (C_Variable name, e') :: accum'
       ) else (
         C_VarDeclare (ty, C_Variable name, Some e') :: accum'
       )
-    in
-    fixup_rev_statements tf accum'' sl, C_Variable name
+    ) accum vardefs
+  in
+
+  (* var postinits *)
+  let accum =
+    List.fold_left (fun accum (ty, name, e, sl) ->
+      fixup_rev_statements tf accum sl
+    ) accum vardefs
+  in
+  accum
 
 and fixup_expression t accum e = (* sticks inlined statements on the front of accum *)
   let tf = { t with global_scope = false } in
   match e with
   | C_LetExpression ldef ->
-      let (accum', e_var) = fixup_let_def t accum ldef in
-      (accum', e_var)
+      let accum' = fixup_let_defs t accum [ldef] in
+      (accum', C_Variable (let_definition_ident ldef))
   | C_InlineRevStatements (_, []) -> failwith "fixup_expression: invalid inlinerevstatements (empty)"
   | C_InlineRevStatements (_ctype, C_Expression e::sl) -> (* avoid creating a deinlined variable if we already have the expression *)
       (* NB: order matters! *)
@@ -1125,10 +1187,8 @@ and fixup_rev_statements t accum sl = (* sticks fixed up sl on the front of accu
       let accum'' =
         match s with
         | C_LetStatement [] -> failwith "empty C_LetStatement"
-        | C_LetStatement [ldef] ->
-            let accum', e_var = fixup_let_def t accum ldef in
-            accum'
-        | C_LetStatement _ -> failwith "fixup_rev_statements: MUTUAL RECURSION UNIMPLEMENTED"
+        | C_LetStatement ldefs ->
+            fixup_let_defs t accum ldefs
         | C_Expression e -> let (accum', e') = fixup_expression t accum e in (C_Expression e') :: accum'
         | C_VarDeclare (ty,eid,None) -> C_VarDeclare (ty,eid,None) :: accum
         | C_VarDeclare (ty,eid,Some e) -> let (accum', e') = fixup_expression tf accum e in C_VarDeclare (ty,eid,Some e') :: accum'
