@@ -432,7 +432,7 @@ module TypeLibrary = struct
     | Tconstr (path, [], _) when path = Predef.path_string -> C_Pointer C_Char
     | Tconstr (path, [], _) when path = Predef.path_float -> C_Double
     (* TODO: add more *)
-    | Tconstr _ -> C_CommentedType (C_Boxed, "unknown Tconstr")
+    | Tconstr _ -> C_CommentedType (C_Boxed, Printf.sprintf "unknown Tconstr %s" (formats Printtyp.type_expr type_expr))
     | Ttuple _
     | Tobject _ ->
         (try TypeHash.find g_table type_expr
@@ -460,41 +460,74 @@ module VarLibrary = struct
     include Ident
     let equal = same (* equal checks equality of name only, not stamp *)
   end)
-  let g_table: ctype VarHash.t = VarHash.create 16
 
-  let ctype id =
+  let create_library () = VarHash.create 16
+
+  let ctype t id =
     let the_ctype =
-      try VarHash.find g_table id
+      try VarHash.find t id
       with Not_found -> (
-        Printf.printf "\n<<<<<<<<<<<<<<<<<<<<WARNING>>>>>>>>>>>>>>>>>>>>\ntype of %s not found. substituting with ocaml_value_t\n<<<<<<<<<<<<<<<<<<<<WARNING>>>>>>>>>>>>>>>>>>>>\n ... " (Ident.unique_name id);
+        Printf.printf "\n<<<<<<<<<<<<<<<<<<<<WARNING>>>>>>>>>>>>>>>>>>>>\ntype of %s not found. substituting with ocaml_value_t\n<<<<<<<<<<<<<<<<<<<<WARNING>>>>>>>>>>>>>>>>>>>>\n" (Ident.unique_name id);
         C_Boxed
       )
     in
     the_ctype
 
 
-  let set_ctype ctype id =
-    Printf.printf "setting type of %s to %s\n" (Ident.unique_name id) (ctype_to_string ctype);
-    if VarHash.mem g_table id then
-      failwith "VarLibrary: trying to set ctype of variable that already exists!"
-    else
-      VarHash.add g_table id ctype
+  let set_ctype t ctype id =
+    try
+      let ctype_orig = VarHash.find t id in
+      if ctype <> ctype_orig then
+        failwith (Printf.sprintf "VarLibrary: trying to set ctype of variable %s that already exists: %s <> %s" (Ident.unique_name id) (ctype_to_string ctype) (ctype_to_string ctype_orig));
+      ()
+    with Not_found -> (
+      Printf.printf "setting type of %s to %s\n" (Ident.unique_name id) (ctype_to_string ctype);
+      VarHash.add t id ctype
+    )
 
-  let create ctype name =
+  let create t ctype name =
     let id = Ident.create name in
     Printf.printf "creating %s with type %s\n" (Ident.unique_name id) (ctype_to_string ctype);
-    set_ctype ctype id;
+    set_ctype t ctype id;
     id
 
-  let reset () =
-    VarHash.clear g_table;
+  let clear t =
+    VarHash.clear t;
     (* prepopulate with some inbuilt modules *)
-    List.iter (fun (ty, id) -> set_ctype ty id)
+    List.iter (fun (ty, id) -> set_ctype t ty id)
     [ C_Pointer C_Boxed, Ident.create_persistent "Pervasives"
     ; C_Pointer C_Boxed, Ident.create_persistent "Printf"
     ; C_Pointer C_Boxed, Ident.create_persistent "List"
     ]
+
+
+  let rec scrape t lam =
+    iter (fun lam ->
+      begin
+        match lam with
+        | Levent (_, ev) ->
+          let env = Envaux.env_from_summary ev.lev_env Subst.identity in
+          Env.fold_values (fun str path value_descr accum ->
+            begin
+              let open Path in
+              match path with
+              | Pident id -> (
+                Printf.printf "> %s to %s\n" (Ident.unique_name id) (formats Printtyp.type_expr value_descr.val_type);
+                let ctype = TypeLibrary.ocaml_to_c_type value_descr.val_type in
+                set_ctype t ctype id;
+              )
+              | Pdot _ | Papply _ -> ()
+            end;
+            accum
+          ) None env ();
+        | lam -> ()
+      end;
+      scrape t lam
+    ) lam
 end
+
+let varlib = VarLibrary.create_library ()
+let varlib_events = VarLibrary.create_library ()
 
 
 let module_initialiser_name module_name = module_name ^ "__init"
@@ -515,7 +548,7 @@ let do_allocation nwords (type_expr_result : _ result) =
         let ctype = TypeLibrary.ocaml_to_c_type type_expr in
         let ctype_size = ctype_size_nwords ctype in
         assert (ctype_size = nwords);
-        ctype, 1
+        C_Pointer ctype, 1
     | Error _ -> C_Boxed, nwords
   in
   C_Allocate(ctype, n, type_expr_result)
@@ -543,10 +576,30 @@ let rec let_to_rev_statements env id lam =
   | Lfunction { params ; body } ->
     let cty, st = lfunction_to_tstatement env lam id params body in
     [st]
+  | Lprim (Pmakeblock (tag, mut, tyinfo), contents) ->
+    (* TODO: dedup? *)
+    let actual_ctype = VarLibrary.ctype varlib_events id in
+    let var = C_Variable id in
+    let rec construct k statements = function
+      | [] -> statements
+      | e_head::el ->
+          let texpr = lambda_to_texpression env e_head in
+          (* TODO: this could be done better *)
+          let elem = C_ArrayIndex (C_Cast (C_Pointer C_Boxed, var), C_IntLiteral (Int64.of_int k)) in
+          let assign = C_Assign (elem, cast C_Boxed texpr) in
+          construct (succ k) (assign::statements) el
+    in
+    let postinit_sl = construct 0 [] contents in
+    VarLibrary.set_ctype varlib (C_Pointer actual_ctype) id;
+    [C_LetStatement [
+      VarDefn (C_Pointer actual_ctype, id,
+               do_allocation (List.length contents) tyinfo,
+               postinit_sl)]
+    ]
   | _ ->
-    let ctype, defn = lambda_to_texpression env lam in
-    VarLibrary.set_ctype ctype id;
-    [C_LetStatement [VarDefn (ctype, id, defn, [])]]
+    let cty, expr = lambda_to_texpression env lam in
+    VarLibrary.set_ctype varlib cty id;
+    [C_LetStatement [VarDefn (cty, id, expr, [])]]
 
 and lfunction_to_tstatement env lam id params body =
   let ret_type, typedparams = get_function_type env params in
@@ -556,14 +609,14 @@ and lfunction_to_tstatement env lam id params body =
   if fv = [] then begin
     (* plain function *)
     let cty = C_FunPointer (ret_type, List.map fst typedparams) in
-    VarLibrary.set_ctype cty id;
+    VarLibrary.set_ctype varlib cty id;
     (cty, C_LetStatement [FunDefn (ret_type, id, typedparams, cbody)])
 
   end else begin
     (* closure required *)
-    let fv_mapping = List.map (fun v -> (v, (VarLibrary.ctype v, C_Variable v))) fv in
+    let fv_mapping = List.map (fun v -> (v, (VarLibrary.ctype varlib v, C_Variable v))) fv in
     let cty, closure = tclosurify (Ident.name id) fv_mapping ret_type typedparams cbody in
-    VarLibrary.set_ctype cty id;
+    VarLibrary.set_ctype varlib cty id;
     (cty, C_LetStatement [VarDefn (cty, id, closure, [])])
   end
 
@@ -605,7 +658,7 @@ and tclosurify name_hint env_mapping ret_type typedparams cbody =
   let typedparams_fun =
     typedparams @ (if n_args <= 5 then [env_type, env_id] else [C_Pointer C_Void, Ident.create "unused" ; env_type, env_id])
   in
-  VarLibrary.set_ctype (C_FunPointer (ret_type, List.map fst typedparams_fun)) id_fun;
+  VarLibrary.set_ctype varlib (C_FunPointer (ret_type, List.map fst typedparams_fun)) id_fun;
 
   let closure_ctype = (C_FunPointer (ret_type, List.map fst typedparams)) in
   let base_function =
@@ -624,9 +677,9 @@ and tclosurify name_hint env_mapping ret_type typedparams cbody =
 (* translate a function let-binding into (ret_type, typedparams, cbody) *)
 and let_function_to_rev_statements env (ret_type, typedparams) body =
   let typedparams_types = List.map fst typedparams in
-  let ret_var_id = VarLibrary.create ret_type "_return_value" in
+  let ret_var_id = VarLibrary.create varlib ret_type "_return_value" in
   (* be careful to assign the param types before lambda_to_trev_statements *)
-  List.iter (fun (ctype, id) -> VarLibrary.set_ctype ctype id) typedparams;
+  List.iter (fun (ctype, id) -> VarLibrary.set_ctype varlib ctype id) typedparams;
   let rev_st =
     assign_last_value_of_statement (ret_type, ret_var_id) (lambda_to_trev_statements env body)
   in
@@ -685,7 +738,7 @@ and lambda_to_texpression env lam : C.texpression =
       | Popaque, [Lprim (Pgetglobal id, [])] ->
           if List.mem id Predef.all_predef_exns then begin
             (* this is a predefined exception *)
-            VarLibrary.set_ctype C_Boxed id;
+            VarLibrary.set_ctype varlib C_Boxed id;
             extern_decls :=
               C_ExternDecl (C_Boxed, C_GlobalVariable (Ident.name id)) ::
               !extern_decls;
@@ -697,14 +750,14 @@ and lambda_to_texpression env lam : C.texpression =
               C_ExternDecl (C_Pointer C_Boxed, C_GlobalVariable (Ident.name id)) ::
               !extern_decls;
             C_Pointer C_Boxed, (* all modules are represented as arrays of ocaml_value_t *)
-            C_InlineRevStatements (VarLibrary.ctype id,
+            C_InlineRevStatements (VarLibrary.ctype varlib id,
               [ C_Expression (C_GlobalVariable (Ident.name id))
               ; C_Expression (C_FunCall (C_GlobalVariable (module_initialiser_name (Ident.name id)), []))])
           end
       | Popaque, [lam] ->
           lambda_to_texpression env lam
       | Pgetglobal id, [] ->
-          VarLibrary.ctype id, C_GlobalVariable (Ident.name id)
+          VarLibrary.ctype varlib id, C_GlobalVariable (Ident.name id)
       | Pfield i, [lam] ->
           (* TODO: make this use type-specific accessors if possible *)
           C_Boxed,
@@ -773,7 +826,7 @@ and lambda_to_texpression env lam : C.texpression =
       | _ -> failwith ("lambda_to_expression Lprim " ^ (Printlambda.name_of_primitive prim))
     end
   | Lconst sc -> structured_constant_to_texpression env sc
-  | Lvar id -> VarLibrary.ctype id, C_Variable id
+  | Lvar id -> VarLibrary.ctype varlib id, C_Variable id
   | Lfunction { params ; body } ->
     let id = Ident.create "__lambda" in
     let cty, st = lfunction_to_tstatement env lam id params body in
@@ -874,17 +927,17 @@ and lambda_to_trev_statements env lam =
       (* NB: loops are always imperative constructs with return type unit *)
       C_Pointer C_Void, [C_While (cexpr_cond, sl_body)]
   | Lfor (param, lo, hi, dir, lbody) ->
-      VarLibrary.set_ctype C_Int param;
+      VarLibrary.set_ctype varlib C_Int param;
       let cexpr_lo = cast C_Int (lambda_to_texpression env lo) in
       let cexpr_hi = cast C_Int (lambda_to_texpression env hi) in
       let (ctype_body, sl_body) = lambda_to_trev_statements env lbody in
       let plim = Ident.create "_limit" in
-      VarLibrary.set_ctype C_Int plim;
+      VarLibrary.set_ctype varlib C_Int plim;
       (* NB: loops are always imperative constructs with return type unit *)
       C_Pointer C_Void, [C_ForInt (param, cexpr_lo, plim, cexpr_hi, dir, sl_body)]
 
   | Ltrywith (lbody, param, lhandler) ->
-      VarLibrary.set_ctype C_Boxed param;
+      VarLibrary.set_ctype varlib C_Boxed param;
       let trev_body = lambda_to_trev_statements env lbody in
       let trev_hand = lambda_to_trev_statements env lhandler in
       let (ctype, sl_body, sl_hand) = unify_revsts ~hint:"trywith" trev_body trev_hand in
@@ -945,7 +998,7 @@ let rec let_to_module_constructor_sl env id lam =
        * because all free variables would be referring to globals *)
       let ret_type, typedparams = get_function_type env params in
       let cbody = let_function_to_rev_statements env (ret_type, typedparams) body in
-      VarLibrary.set_ctype (C_FunPointer (ret_type, List.map fst typedparams)) id;
+      VarLibrary.set_ctype varlib (C_FunPointer (ret_type, List.map fst typedparams)) id;
       [C_LetStatement [FunDefn (ret_type, id, typedparams, cbody)]]
   | _ ->
       let_to_rev_statements env id lam
@@ -1110,8 +1163,11 @@ end
 
 let compile_implementation modulename lambda =
   let () = TypeLibrary.reset () in
-  let () = VarLibrary.reset () in
+  let () = VarLibrary.clear varlib in
+  let () = VarLibrary.clear varlib_events in
   let () = Translate.reset () in
+
+  VarLibrary.scrape varlib_events lambda;
 
   let module_export_var = C_GlobalVariable modulename in (* no need to add export var to VarLibrary *)
   let module_constructor_sl =
