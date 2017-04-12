@@ -643,7 +643,11 @@ let rec let_to_definition ?(at_root=false) id lam =
 and lfunction_to_letdefinition ?(at_root=false) lam id params body =
   let ret_type, typedparams = get_function_type params in
   let cbody = let_function_to_rev_statements (ret_type, typedparams) body in
-  let fv = IdentSet.elements (free_variables (Lletrec([id, lam], lambda_unit))) in
+  let fv =
+    (* Not the following, because that doesn't count self as free *)
+    (* IdentSet.elements (free_variables (Lletrec([id, lam], lambda_unit))) *)
+    IdentSet.elements (free_variables lam)
+  in
 
   if at_root || fv = [] then begin
     (* plain function *)
@@ -661,6 +665,7 @@ and lfunction_to_letdefinition ?(at_root=false) lam id params body =
 
 (* build a closure out of a base function's parts.
  * [env_mapping] specifies a mapping of (Ident.t * texpression) which represent variables in the environment, which cbody will have access to.
+ * note that tclosurify will NOT check for recursive calls to the function being defined -- that needs to have been handled in lfunction_to_letdefinition already
  * *)
 and tclosurify name_hint env_mapping ret_type typedparams cbody =
   let id_fun = Ident.create ("__closure_" ^ name_hint) in (* the ID of the closure base function *)

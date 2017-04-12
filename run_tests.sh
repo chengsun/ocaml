@@ -8,7 +8,7 @@ TESTS=${1-`cd tests; ls -1 *.ml`}
 for ml in $TESTS; do
     name=${ml%.ml}
 
-    if [[ "$name" = "test_letrec" ]]; then
+    if [[ "$name" = "test_closure_letrec" ]]; then
         continue
     fi
 
