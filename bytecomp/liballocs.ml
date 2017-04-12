@@ -508,7 +508,6 @@ module VarLibrary = struct
               let open Path in
               match path with
               | Pident id -> (
-                Printf.printf "> %s to %s\n" (Ident.unique_name id) (formats Printtyp.type_expr value_descr.val_type);
                 let ctype = TypeLibrary.ocaml_to_c_type value_descr.val_type in
                 set_ctype t ctype id;
               )
