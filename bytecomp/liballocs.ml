@@ -986,16 +986,16 @@ let rec lambda_to_module_constructor_sl export_var lam =
       lambda_to_module_constructor_sl export_var body
   | Llet (_strict, id, args, body) ->
       (* evaluation order important for type propagation *)
-      let a = let_to_definition ~at_root:true id args in
+      let letdefns = let_to_definition ~at_root:true id args in
       let b = lambda_to_module_constructor_sl export_var body in
-      b @ [C_LetStatement [a]]
+      b @ [C_LetStatement [letdefns]]
   | Lletrec (id_args_list, body) ->
       (* evaluation order important for type propagation *)
       (* we declare at_root so that toplevel functions that refer to toplevel
        * globals don't get defined as closures *)
-      let a = List.map (fun (id, args) -> let_to_definition ~at_root:true id args) id_args_list in
+      let letdefns = List.map (fun (id, args) -> let_to_definition ~at_root:true id args) id_args_list in
       let b = lambda_to_module_constructor_sl export_var body in
-      b @ [C_LetStatement a]
+      b @ [C_LetStatement letdefns]
   | Lsequence (l1, l2) -> (* let () = l1;; l2 *)
       let cbody1 = snd (lambda_to_trev_statements l1) in
       let cbody2 = lambda_to_module_constructor_sl export_var l2 in
