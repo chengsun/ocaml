@@ -33,6 +33,7 @@ let rec count d start startd startacc power =
                 acc := endacc;
                 counter := !counter + result;
             done;
+            assert (!acc = endacc);
             !counter
         )
     in

@@ -849,11 +849,8 @@ and lambda_to_texpression lam : C.texpression =
       | Popaque, [Lprim (Pgetglobal id, [])] ->
           if List.mem id Predef.all_predef_exns then begin
             (* this is a predefined exception *)
-            VarLibrary.set_ctype varlib C_Boxed id;
-            extern_decls :=
-              C_ExternDecl (C_Boxed, C_GlobalVariable (Ident.name id)) ::
-              !extern_decls;
-            C_Boxed, C_GlobalVariable (Ident.name id)
+            VarLibrary.set_ctype varlib (C_Pointer C_Boxed) id;
+            C_Pointer C_Boxed, C_GlobalVariable (Ident.name id)
           end else begin
             (* assume these are declarations of use of external modules; ensure initialisation *)
             extern_decls :=

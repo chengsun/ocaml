@@ -54,44 +54,57 @@ extern struct ocaml_liballocs_exn_handler
             __ocaml_liballocs_g_exn_handler_head->next; \
     } while (0)
 
-ocaml_value_t ocaml_liballocs_get_exn(); // get the currently-being-handled exception
-ocaml_value_t ocaml_liballocs_raise_exn(ocaml_value_t exn);
+extern ocaml_value_t ocaml_liballocs_get_exn(); // get the currently-being-handled exception
+extern ocaml_value_t ocaml_liballocs_raise_exn(ocaml_value_t exn);
 
 
 // closures
 
-generic_funcp_t ocaml_liballocs_close(generic_funcp_t fun, int64_t n_args, ocaml_value_t env);
+extern generic_funcp_t ocaml_liballocs_close(generic_funcp_t fun, int64_t n_args, ocaml_value_t env);
 
 
 
-ocaml_value_t caml_set_oo_id (ocaml_value_t obj);
-ocaml_value_t caml_fresh_oo_id (ocaml_value_t v);
+extern ocaml_value_t caml_set_oo_id (ocaml_value_t obj);
+extern ocaml_value_t caml_fresh_oo_id (ocaml_value_t v);
 
 
 
 // runtime stuff
 
-inline ocaml_value_t caml_equal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_equal unimplemented"); }
-inline ocaml_value_t caml_notequal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_notequal unimplemented"); }
-inline ocaml_value_t caml_lessthan(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_lessthan unimplemented"); }
-inline ocaml_value_t caml_greaterthan(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_greaterthan unimplemented"); }
-inline ocaml_value_t caml_lessequal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_lessequal unimplemented"); }
-inline ocaml_value_t caml_greaterequal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_greaterequal unimplemented"); }
+extern ocaml_value_t *Match_failure;
+extern ocaml_value_t *Assert_failure;
+extern ocaml_value_t *Invalid_argument;
+extern ocaml_value_t *Failure;
+extern ocaml_value_t *Not_found;
+extern ocaml_value_t *Out_of_memory;
+extern ocaml_value_t *Stack_overflow;
+extern ocaml_value_t *Sys_error;
+extern ocaml_value_t *End_of_file;
+extern ocaml_value_t *Division_by_zero;
+extern ocaml_value_t *Sys_blocked_io;
+extern ocaml_value_t *Undefined_recursive_module;
 
-inline ocaml_value_t caml_string_equal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_string_equal unimplemented"); }
-inline ocaml_value_t caml_string_notequal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_string_notequal unimplemented"); }
-inline ocaml_value_t caml_string_lessthan(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_string_lessthan unimplemented"); }
-inline ocaml_value_t caml_string_greaterthan(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_string_greaterthan unimplemented"); }
-inline ocaml_value_t caml_string_lessequal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_string_lessequal unimplemented"); }
-inline ocaml_value_t caml_string_greaterequal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_string_greaterequal unimplemented"); }
+static ocaml_value_t caml_equal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_equal unimplemented"); }
+static ocaml_value_t caml_notequal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_notequal unimplemented"); }
+static ocaml_value_t caml_lessthan(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_lessthan unimplemented"); }
+static ocaml_value_t caml_greaterthan(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_greaterthan unimplemented"); }
+static ocaml_value_t caml_lessequal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_lessequal unimplemented"); }
+static ocaml_value_t caml_greaterequal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_greaterequal unimplemented"); }
+
+static ocaml_value_t caml_string_equal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_string_equal unimplemented"); }
+static ocaml_value_t caml_string_notequal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_string_notequal unimplemented"); }
+static ocaml_value_t caml_string_lessthan(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_string_lessthan unimplemented"); }
+static ocaml_value_t caml_string_greaterthan(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_string_greaterthan unimplemented"); }
+static ocaml_value_t caml_string_lessequal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_string_lessequal unimplemented"); }
+static ocaml_value_t caml_string_greaterequal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_string_greaterequal unimplemented"); }
 
 
-inline ocaml_value_t caml_compare(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_compare unimplemented"); }
-inline ocaml_value_t caml_int_compare(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_int_compare unimplemented"); }
-inline ocaml_value_t caml_string_compare(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_string_compare unimplemented"); }
-inline ocaml_value_t caml_nativeint_compare(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_nativeint_compare unimplemented"); }
-inline ocaml_value_t caml_int32_compare(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_int32_compare unimplemented"); }
-inline ocaml_value_t caml_int64_compare(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_int64_compare unimplemented"); }
+static ocaml_value_t caml_compare(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_compare unimplemented"); }
+static ocaml_value_t caml_int_compare(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_int_compare unimplemented"); }
+static ocaml_value_t caml_string_compare(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_string_compare unimplemented"); }
+static ocaml_value_t caml_nativeint_compare(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_nativeint_compare unimplemented"); }
+static ocaml_value_t caml_int32_compare(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_int32_compare unimplemented"); }
+static ocaml_value_t caml_int64_compare(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_int64_compare unimplemented"); }
 
 
 
@@ -99,7 +112,7 @@ inline ocaml_value_t caml_int64_compare(ocaml_value_t v1, ocaml_value_t v2) { as
 external register_named_value : string -> 'a -> unit
                               = "caml_register_named_value"
 */
-inline ocaml_value_t caml_register_named_value(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_register_named_value unimplemented"); }
+static ocaml_value_t caml_register_named_value(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_register_named_value unimplemented"); }
 
 /*
 external ( ** ) : float -> float -> float = "caml_power_float" "pow"
@@ -151,7 +164,7 @@ external modf : float -> float * float = "caml_modf_float"
 /*
 external float_of_bits : int64 -> float = "caml_int64_float_of_bits"
 */
-inline ocaml_value_t caml_int64_float_of_bits(ocaml_value_t v) {
+static ocaml_value_t caml_int64_float_of_bits(ocaml_value_t v) {
     return (ocaml_value_t){.d = (double)v.i};
 }
 
@@ -168,14 +181,14 @@ external format_float : string -> float -> string = "caml_format_float"
 external int_of_string : string -> int = "caml_int_of_string"
 external float_of_string : string -> float = "caml_float_of_string"
 */
-inline ocaml_value_t caml_create_string(ocaml_value_t v) { assert(false && "caml_create_string unimplemented"); }
-inline ocaml_value_t caml_blit_string(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3, ocaml_value_t v4, ocaml_value_t v5) { assert(false && "caml_blit_string unimplemented"); }
-inline ocaml_value_t caml_format_int(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_format_int unimplemented"); }
-inline ocaml_value_t caml_format_float(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_format_float unimplemented"); }
-inline ocaml_value_t caml_int_of_string(ocaml_value_t v) {
+static ocaml_value_t caml_create_string(ocaml_value_t v) { assert(false && "caml_create_string unimplemented"); }
+static ocaml_value_t caml_blit_string(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3, ocaml_value_t v4, ocaml_value_t v5) { assert(false && "caml_blit_string unimplemented"); }
+static ocaml_value_t caml_format_int(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_format_int unimplemented"); }
+static ocaml_value_t caml_format_float(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_format_float unimplemented"); }
+static ocaml_value_t caml_int_of_string(ocaml_value_t v) {
     return (ocaml_value_t){.i = atol((const char *) v.p)};
 }
-inline ocaml_value_t caml_float_of_string(ocaml_value_t v) {
+static ocaml_value_t caml_float_of_string(ocaml_value_t v) {
     return (ocaml_value_t){.d = (double)atof((const char *) v.p)};
 }
 
@@ -186,9 +199,9 @@ external open_descriptor_out : int -> out_channel
 external open_descriptor_in : int -> in_channel = "caml_ml_open_descriptor_in"
 external open_desc : string -> open_flag list -> int -> int = "caml_sys_open"
 */
-inline ocaml_value_t caml_ml_open_descriptor_out(ocaml_value_t v) { assert(false && "caml_ml_open_descriptor_out unimplemented"); }
-inline ocaml_value_t caml_ml_open_descriptor_in (ocaml_value_t v) { assert(false && "caml_ml_open_descriptor_in unimplemented"); }
-inline ocaml_value_t caml_sys_open(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3) { assert(false && "caml_ml_open_desc unimplemented"); }
+static ocaml_value_t caml_ml_open_descriptor_out(ocaml_value_t v) { assert(false && "caml_ml_open_descriptor_out unimplemented"); }
+static ocaml_value_t caml_ml_open_descriptor_in (ocaml_value_t v) { assert(false && "caml_ml_open_descriptor_in unimplemented"); }
+static ocaml_value_t caml_sys_open(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3) { assert(false && "caml_ml_open_desc unimplemented"); }
 
 
 /*
@@ -237,37 +250,37 @@ external pos_in : in_channel -> int64 = "caml_ml_pos_in_64"
 external in_channel_length : in_channel -> int64 = "caml_ml_channel_size_64"
 external sys_exit : int -> 'a = "caml_sys_exit"
 */
-inline ocaml_value_t caml_ml_set_channel_name(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_set_channel_name unimplemented"); }
-inline ocaml_value_t caml_ml_flush(ocaml_value_t v) { assert(false && "caml_ml_flush unimplemented"); }
-inline ocaml_value_t caml_ml_out_channels_list(ocaml_value_t v) { assert(false && "caml_ml_out_channels_list unimplemented"); }
+static ocaml_value_t caml_ml_set_channel_name(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_set_channel_name unimplemented"); }
+static ocaml_value_t caml_ml_flush(ocaml_value_t v) { assert(false && "caml_ml_flush unimplemented"); }
+static ocaml_value_t caml_ml_out_channels_list(ocaml_value_t v) { assert(false && "caml_ml_out_channels_list unimplemented"); }
 
-inline ocaml_value_t caml_ml_output(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3, ocaml_value_t v4) { assert(false && "caml_ml_output unimplemented"); }
-inline ocaml_value_t caml_ml_output_char(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_output_char unimplemented"); }
-inline ocaml_value_t caml_ml_output_int(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_output_int unimplemented"); }
-inline ocaml_value_t caml_output_value(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3) { assert(false && "caml_ml_output_value unimplemented"); }
+static ocaml_value_t caml_ml_output(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3, ocaml_value_t v4) { assert(false && "caml_ml_output unimplemented"); }
+static ocaml_value_t caml_ml_output_char(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_output_char unimplemented"); }
+static ocaml_value_t caml_ml_output_int(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_output_int unimplemented"); }
+static ocaml_value_t caml_output_value(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3) { assert(false && "caml_ml_output_value unimplemented"); }
 
-inline ocaml_value_t caml_ml_input(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3, ocaml_value_t v4) { assert(false && "caml_ml_input unimplemented"); }
-inline ocaml_value_t caml_ml_input_scan_line(ocaml_value_t v) { assert(false && "caml_ml_input_scan_line unimplemented"); }
-inline ocaml_value_t caml_ml_input_char(ocaml_value_t v) { assert(false && "caml_ml_input_char unimplemented"); }
-inline ocaml_value_t caml_ml_input_int(ocaml_value_t v) { assert(false && "caml_ml_input_int unimplemented"); }
-inline ocaml_value_t caml_input_value(ocaml_value_t v) { assert(false && "caml_input_value unimplemented"); }
+static ocaml_value_t caml_ml_input(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3, ocaml_value_t v4) { assert(false && "caml_ml_input unimplemented"); }
+static ocaml_value_t caml_ml_input_scan_line(ocaml_value_t v) { assert(false && "caml_ml_input_scan_line unimplemented"); }
+static ocaml_value_t caml_ml_input_char(ocaml_value_t v) { assert(false && "caml_ml_input_char unimplemented"); }
+static ocaml_value_t caml_ml_input_int(ocaml_value_t v) { assert(false && "caml_ml_input_int unimplemented"); }
+static ocaml_value_t caml_input_value(ocaml_value_t v) { assert(false && "caml_input_value unimplemented"); }
 
-inline ocaml_value_t caml_ml_close_channel(ocaml_value_t v) { assert(false && "caml_ml_close_channel unimplemented"); }
-inline ocaml_value_t caml_ml_set_binary_mode(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_set_binary_mode unimplemented"); }
+static ocaml_value_t caml_ml_close_channel(ocaml_value_t v) { assert(false && "caml_ml_close_channel unimplemented"); }
+static ocaml_value_t caml_ml_set_binary_mode(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_set_binary_mode unimplemented"); }
 
-inline ocaml_value_t caml_ml_seek_in(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_seek_in unimplemented"); }
-inline ocaml_value_t caml_ml_pos_in(ocaml_value_t v) { assert(false && "caml_ml_pos_in unimplemented"); }
-inline ocaml_value_t caml_ml_seek_out(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_seek_out unimplemented"); }
-inline ocaml_value_t caml_ml_pos_out(ocaml_value_t v) { assert(false && "caml_ml_pos_out unimplemented"); }
-inline ocaml_value_t caml_ml_channel_size(ocaml_value_t v) { assert(false && "caml_ml_channel_size unimplemented"); }
+static ocaml_value_t caml_ml_seek_in(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_seek_in unimplemented"); }
+static ocaml_value_t caml_ml_pos_in(ocaml_value_t v) { assert(false && "caml_ml_pos_in unimplemented"); }
+static ocaml_value_t caml_ml_seek_out(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_seek_out unimplemented"); }
+static ocaml_value_t caml_ml_pos_out(ocaml_value_t v) { assert(false && "caml_ml_pos_out unimplemented"); }
+static ocaml_value_t caml_ml_channel_size(ocaml_value_t v) { assert(false && "caml_ml_channel_size unimplemented"); }
 
-inline ocaml_value_t caml_ml_seek_in_64(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_seek_in_64 unimplemented"); }
-inline ocaml_value_t caml_ml_pos_in_64(ocaml_value_t v) { assert(false && "caml_ml_pos_in_64 unimplemented"); }
-inline ocaml_value_t caml_ml_seek_out_64(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_seek_out_64 unimplemented"); }
-inline ocaml_value_t caml_ml_pos_out_64(ocaml_value_t v) { assert(false && "caml_ml_pos_out_64 unimplemented"); }
-inline ocaml_value_t caml_ml_channel_size_64(ocaml_value_t v) { assert(false && "caml_ml_channel_size_64 unimplemented"); }
+static ocaml_value_t caml_ml_seek_in_64(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_seek_in_64 unimplemented"); }
+static ocaml_value_t caml_ml_pos_in_64(ocaml_value_t v) { assert(false && "caml_ml_pos_in_64 unimplemented"); }
+static ocaml_value_t caml_ml_seek_out_64(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_seek_out_64 unimplemented"); }
+static ocaml_value_t caml_ml_pos_out_64(ocaml_value_t v) { assert(false && "caml_ml_pos_out_64 unimplemented"); }
+static ocaml_value_t caml_ml_channel_size_64(ocaml_value_t v) { assert(false && "caml_ml_channel_size_64 unimplemented"); }
 
-inline ocaml_value_t caml_sys_exit(ocaml_value_t v) {
+static ocaml_value_t caml_sys_exit(ocaml_value_t v) {
     exit(v.i);
 }
 

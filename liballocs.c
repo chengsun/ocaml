@@ -165,6 +165,35 @@ generic_funcp_t ocaml_liballocs_close(generic_funcp_t fun, int64_t n_args, ocaml
 
 
 
+// runtime stuff
+
+#define _QUOTE(x) #x
+#define QUOTE(x) _QUOTE(x)
+#define DEFINE_BUILTIN_EXCEPTION(name) \
+    ocaml_value_t __##name[2] = { \
+        (ocaml_value_t){ .p = (ocaml_value_t *) QUOTE(name) }, \
+        (ocaml_value_t){ .i = 0 } \
+    }; \
+    ocaml_value_t *name = __##name;
+
+DEFINE_BUILTIN_EXCEPTION(Match_failure)
+DEFINE_BUILTIN_EXCEPTION(Assert_failure)
+DEFINE_BUILTIN_EXCEPTION(Invalid_argument)
+DEFINE_BUILTIN_EXCEPTION(Failure)
+DEFINE_BUILTIN_EXCEPTION(Not_found)
+DEFINE_BUILTIN_EXCEPTION(Out_of_memory)
+DEFINE_BUILTIN_EXCEPTION(Stack_overflow)
+DEFINE_BUILTIN_EXCEPTION(Sys_error)
+DEFINE_BUILTIN_EXCEPTION(End_of_file)
+DEFINE_BUILTIN_EXCEPTION(Division_by_zero)
+DEFINE_BUILTIN_EXCEPTION(Sys_blocked_io)
+DEFINE_BUILTIN_EXCEPTION(Undefined_recursive_module)
+
+#undef _QUOTE
+#undef QUOTE
+#undef DEFINE_BUILTIN_EXCEPTION
+
+
 void ocaml_liballocs_show(ocaml_value_t obj) {
     fprintf(stderr, "%d\n", obj.i);
 }
