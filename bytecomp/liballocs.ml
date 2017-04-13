@@ -452,8 +452,8 @@ module TypeLibrary = struct
         (try TypeHash.find g_table type_expr
          with Not_found -> add_mapping type_expr)
     | Tfield _ | Tnil -> failwith "unexpected Tfield/Tnil at top level"
-    | Tlink _e
-    | Tsubst _e -> failwith "unexpected Tlink/Tsubst" (* ocaml_to_c_type e probably? *)
+    | Tlink e -> ocaml_to_c_type e
+    | Tsubst _e -> failwith "unexpected Tsubst" (* ocaml_to_c_type e probably? *)
     | Tvariant _ -> failwith "really need to handle Tvariant" (* TODO *)
     | Tunivar _ | Tpoly _ | Tpackage _ -> failwith "type which i have no idea"
 
