@@ -21,8 +21,8 @@ typedef union _ocaml_value_t {
     generic_funcp_t fp;
 } ocaml_value_t;
 
-STATIC_ASSERT(sizeof(intptr_t) == 8, sizeof_funcp);
-STATIC_ASSERT(sizeof(double) == 8, sizeof_funcp);
+STATIC_ASSERT(sizeof(intptr_t) == 8, sizeof_intptr_t);
+STATIC_ASSERT(sizeof(double) == 8, sizeof_double);
 STATIC_ASSERT(sizeof(generic_datap_t) == 8, sizeof_datap);
 STATIC_ASSERT(sizeof(generic_funcp_t) == 8, sizeof_funcp);
 STATIC_ASSERT(sizeof(ocaml_value_t) == 8, sizeof_ocaml_value);
