@@ -65,8 +65,8 @@ module C = struct
     | C_Boxed -> "ocaml_value_t"
     | C_Void -> "void"
     | C_Int -> "intptr_t"
+    | C_UInt -> "uintptr_t"
     | C_Double -> "double"
-    | C_UInt -> "unsigned"
     | C_Bool -> "bool"
     | C_Char -> "char"
     | C_Struct (id, _) -> "struct " ^ (Ident.unique_name id)
@@ -845,6 +845,7 @@ and lambda_to_texpression lam : C.texpression =
       | Pxorint, [e1;e2] -> int_bop "^" e1 e2
       | Plslint, [e1;e2] -> int_bop "<<" e1 e2
       | Plsrint, [e1;e2] -> bop C_UInt C_UInt ">>" e1 e2
+      | Pasrint, [e1;e2] -> int_bop ">>" e1 e2
       | Pnegint, [e] -> int_uop "-" e
       | Pintcomp(Ceq), [e1;e2] -> intcmp_bop "==" e1 e2
       | Pintcomp(Cneq), [e1;e2] -> intcmp_bop "!=" e1 e2
