@@ -8,6 +8,7 @@
     - inline statements
     - let statements/expressions (global vs local)
     - mutual recursion (post-init statements)
+- linking and modules
 - standard library
 - closures
     - three cases: named, anonymous lambda, partial application
