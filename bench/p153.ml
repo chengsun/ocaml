@@ -20,6 +20,7 @@ let rec gcd a b =
 ;;
 
 exception Done of int
+exception Impossible
 
 let gaussdivs =
     list_fold_range max ~f:(fun accum a ->
@@ -38,7 +39,7 @@ let gaussdivs =
                       multipleloop accum 1
                 )
             );
-            raise Not_found
+            raise Impossible
           with Done x -> x
         )
     )
