@@ -841,6 +841,9 @@ and lambda_to_texpression lam : C.texpression =
       let int_bop = bop C_Int C_Int in
       let intcmp_bop = bop C_Int C_Bool in
       let int_uop = uop C_Int in
+      let float_bop = bop C_Double C_Double in
+      let floatcmp_bop = bop C_Double C_Bool in
+      let float_uop = uop C_Double in
       match prim, largs with
       | Pidentity, [x] -> (* why does Pidentity occur? e.g. in Pervasives *)
           lambda_to_texpression x
@@ -929,6 +932,19 @@ and lambda_to_texpression lam : C.texpression =
       | Pintcomp(Cgt), [e1;e2] -> intcmp_bop ">" e1 e2
       | Pintcomp(Cge), [e1;e2] -> intcmp_bop ">=" e1 e2
       | Poffsetint n, [e] -> int_bop "+" e (Lconst (Const_base (Const_int n)))
+      | Pfloatofint, [e] -> C_Double, C_Cast (C_Double, cast C_Int (lambda_to_texpression e))
+      | Pintoffloat, [e] -> C_Int, C_Cast (C_Int, cast C_Double (lambda_to_texpression e))
+      | Paddfloat, [e1;e2] -> float_bop "+" e1 e2
+      | Psubfloat, [e1;e2] -> float_bop "-" e1 e2
+      | Pmulfloat, [e1;e2] -> float_bop "*" e1 e2
+      | Pdivfloat, [e1;e2] -> float_bop "/" e1 e2
+      | Pnegfloat, [e] -> float_uop "-" e
+      | Pfloatcomp(Ceq), [e1;e2]  -> floatcmp_bop "==" e1 e2
+      | Pfloatcomp(Cneq), [e1;e2] -> floatcmp_bop "!=" e1 e2
+      | Pfloatcomp(Clt), [e1;e2]  -> floatcmp_bop "<" e1 e2
+      | Pfloatcomp(Cle), [e1;e2]  -> floatcmp_bop "<=" e1 e2
+      | Pfloatcomp(Cgt), [e1;e2]  -> floatcmp_bop ">" e1 e2
+      | Pfloatcomp(Cge), [e1;e2]  -> floatcmp_bop ">=" e1 e2
       | Pccall {prim_name; prim_arity}, lam ->
           assert (List.length lam = prim_arity);
           let args =
