@@ -1,6 +1,7 @@
 #ifndef OCAML_LIBALLOCS_H
 #define OCAML_LIBALLOCS_H
 
+#include <assert.h>
 #include <stdlib.h>    // for malloc
 #include <stdint.h>
 #include <stdbool.h>
@@ -66,5 +67,208 @@ generic_funcp_t ocaml_liballocs_close(generic_funcp_t fun, int64_t n_args, ocaml
 ocaml_value_t caml_set_oo_id (ocaml_value_t obj);
 ocaml_value_t caml_fresh_oo_id (ocaml_value_t v);
 
+
+
+// runtime stuff
+
+inline ocaml_value_t caml_equal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_equal unimplemented"); }
+inline ocaml_value_t caml_notequal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_notequal unimplemented"); }
+inline ocaml_value_t caml_lessthan(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_lessthan unimplemented"); }
+inline ocaml_value_t caml_greaterthan(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_greaterthan unimplemented"); }
+inline ocaml_value_t caml_lessequal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_lessequal unimplemented"); }
+inline ocaml_value_t caml_greaterequal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_greaterequal unimplemented"); }
+
+inline ocaml_value_t caml_string_equal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_string_equal unimplemented"); }
+inline ocaml_value_t caml_string_notequal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_string_notequal unimplemented"); }
+inline ocaml_value_t caml_string_lessthan(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_string_lessthan unimplemented"); }
+inline ocaml_value_t caml_string_greaterthan(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_string_greaterthan unimplemented"); }
+inline ocaml_value_t caml_string_lessequal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_string_lessequal unimplemented"); }
+inline ocaml_value_t caml_string_greaterequal(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_string_greaterequal unimplemented"); }
+
+
+inline ocaml_value_t caml_compare(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_compare unimplemented"); }
+inline ocaml_value_t caml_int_compare(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_int_compare unimplemented"); }
+inline ocaml_value_t caml_string_compare(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_string_compare unimplemented"); }
+inline ocaml_value_t caml_nativeint_compare(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_nativeint_compare unimplemented"); }
+inline ocaml_value_t caml_int32_compare(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_int32_compare unimplemented"); }
+inline ocaml_value_t caml_int64_compare(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_int64_compare unimplemented"); }
+
+
+
+/*
+external register_named_value : string -> 'a -> unit
+                              = "caml_register_named_value"
+*/
+inline ocaml_value_t caml_register_named_value(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_register_named_value unimplemented"); }
+
+/*
+external ( ** ) : float -> float -> float = "caml_power_float" "pow"
+  [@@unboxed] [@@noalloc]
+external exp : float -> float = "caml_exp_float" "exp" [@@unboxed] [@@noalloc]
+external expm1 : float -> float = "caml_expm1_float" "caml_expm1"
+  [@@unboxed] [@@noalloc]
+external acos : float -> float = "caml_acos_float" "acos"
+  [@@unboxed] [@@noalloc]
+external asin : float -> float = "caml_asin_float" "asin"
+  [@@unboxed] [@@noalloc]
+external atan : float -> float = "caml_atan_float" "atan"
+  [@@unboxed] [@@noalloc]
+external atan2 : float -> float -> float = "caml_atan2_float" "atan2"
+  [@@unboxed] [@@noalloc]
+external hypot : float -> float -> float
+               = "caml_hypot_float" "caml_hypot" [@@unboxed] [@@noalloc]
+external cos : float -> float = "caml_cos_float" "cos" [@@unboxed] [@@noalloc]
+external cosh : float -> float = "caml_cosh_float" "cosh"
+  [@@unboxed] [@@noalloc]
+external log : float -> float = "caml_log_float" "log" [@@unboxed] [@@noalloc]
+external log10 : float -> float = "caml_log10_float" "log10"
+  [@@unboxed] [@@noalloc]
+external log1p : float -> float = "caml_log1p_float" "caml_log1p"
+  [@@unboxed] [@@noalloc]
+external sin : float -> float = "caml_sin_float" "sin" [@@unboxed] [@@noalloc]
+external sinh : float -> float = "caml_sinh_float" "sinh"
+  [@@unboxed] [@@noalloc]
+external sqrt : float -> float = "caml_sqrt_float" "sqrt"
+  [@@unboxed] [@@noalloc]
+external tan : float -> float = "caml_tan_float" "tan" [@@unboxed] [@@noalloc]
+external tanh : float -> float = "caml_tanh_float" "tanh"
+  [@@unboxed] [@@noalloc]
+external ceil : float -> float = "caml_ceil_float" "ceil"
+  [@@unboxed] [@@noalloc]
+external floor : float -> float = "caml_floor_float" "floor"
+  [@@unboxed] [@@noalloc]
+external copysign : float -> float -> float
+                  = "caml_copysign_float" "caml_copysign"
+                  [@@unboxed] [@@noalloc]
+external mod_float : float -> float -> float = "caml_fmod_float" "fmod"
+  [@@unboxed] [@@noalloc]
+external frexp : float -> float * int = "caml_frexp_float"
+external ldexp : (float [@unboxed]) -> (int [@untagged]) -> (float [@unboxed]) =
+  "caml_ldexp_float" "caml_ldexp_float_unboxed" [@@noalloc]
+external modf : float -> float * float = "caml_modf_float"
+*/
+
+/*
+external float_of_bits : int64 -> float = "caml_int64_float_of_bits"
+*/
+inline ocaml_value_t caml_int64_float_of_bits(ocaml_value_t v) {
+    return (ocaml_value_t){.d = (double)v.i};
+}
+
+/*
+external classify_float : (float [@unboxed]) -> fpclass =
+  "caml_classify_float" "caml_classify_float_unboxed" [@@noalloc]
+external bytes_create : int -> bytes = "caml_create_string"
+external string_blit : string -> int -> bytes -> int -> int -> unit
+                     = "caml_blit_string" [@@noalloc]
+external bytes_blit : bytes -> int -> bytes -> int -> int -> unit
+                        = "caml_blit_string" [@@noalloc]
+external format_int : string -> int -> string = "caml_format_int"
+external format_float : string -> float -> string = "caml_format_float"
+external int_of_string : string -> int = "caml_int_of_string"
+external float_of_string : string -> float = "caml_float_of_string"
+*/
+inline ocaml_value_t caml_create_string(ocaml_value_t v) { assert(false && "caml_create_string unimplemented"); }
+inline ocaml_value_t caml_blit_string(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3, ocaml_value_t v4, ocaml_value_t v5) { assert(false && "caml_blit_string unimplemented"); }
+inline ocaml_value_t caml_format_int(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_format_int unimplemented"); }
+inline ocaml_value_t caml_format_float(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_format_float unimplemented"); }
+inline ocaml_value_t caml_int_of_string(ocaml_value_t v) {
+    return (ocaml_value_t){.i = atol((const char *) v.p)};
+}
+inline ocaml_value_t caml_float_of_string(ocaml_value_t v) {
+    return (ocaml_value_t){.d = (double)atof((const char *) v.p)};
+}
+
+
+/*
+external open_descriptor_out : int -> out_channel
+                             = "caml_ml_open_descriptor_out"
+external open_descriptor_in : int -> in_channel = "caml_ml_open_descriptor_in"
+external open_desc : string -> open_flag list -> int -> int = "caml_sys_open"
+*/
+inline ocaml_value_t caml_ml_open_descriptor_out(ocaml_value_t v) { assert(false && "caml_ml_open_descriptor_out unimplemented"); }
+inline ocaml_value_t caml_ml_open_descriptor_in (ocaml_value_t v) { assert(false && "caml_ml_open_descriptor_in unimplemented"); }
+inline ocaml_value_t caml_sys_open(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3) { assert(false && "caml_ml_open_desc unimplemented"); }
+
+
+/*
+external set_out_channel_name: out_channel -> string -> unit =
+  "caml_ml_set_channel_name"
+external flush : out_channel -> unit = "caml_ml_flush"
+external out_channels_list : unit -> out_channel list
+                           = "caml_ml_out_channels_list"
+external unsafe_output : out_channel -> bytes -> int -> int -> unit
+                       = "caml_ml_output"
+external unsafe_output_string : out_channel -> string -> int -> int -> unit
+                              = "caml_ml_output"
+external output_char : out_channel -> char -> unit = "caml_ml_output_char"
+external output_byte : out_channel -> int -> unit = "caml_ml_output_char"
+external output_binary_int : out_channel -> int -> unit = "caml_ml_output_int"
+external marshal_to_channel : out_channel -> 'a -> unit list -> unit
+     = "caml_output_value"
+external seek_out : out_channel -> int -> unit = "caml_ml_seek_out"
+external pos_out : out_channel -> int = "caml_ml_pos_out"
+external out_channel_length : out_channel -> int = "caml_ml_channel_size"
+external close_out_channel : out_channel -> unit = "caml_ml_close_channel"
+external set_binary_mode_out : out_channel -> bool -> unit
+                             = "caml_ml_set_binary_mode"
+external set_in_channel_name: in_channel -> string -> unit =
+  "caml_ml_set_channel_name"
+external input_char : in_channel -> char = "caml_ml_input_char"
+
+external unsafe_input : in_channel -> bytes -> int -> int -> int
+                      = "caml_ml_input"
+external input_scan_line : in_channel -> int = "caml_ml_input_scan_line"
+external input_byte : in_channel -> int = "caml_ml_input_char"
+external input_binary_int : in_channel -> int = "caml_ml_input_int"
+external input_value : in_channel -> 'a = "caml_input_value"
+external seek_in : in_channel -> int -> unit = "caml_ml_seek_in"
+external pos_in : in_channel -> int = "caml_ml_pos_in"
+external in_channel_length : in_channel -> int = "caml_ml_channel_size"
+external close_in : in_channel -> unit = "caml_ml_close_channel"
+external set_binary_mode_in : in_channel -> bool -> unit
+                            = "caml_ml_set_binary_mode"
+external seek_out : out_channel -> int64 -> unit = "caml_ml_seek_out_64"
+external pos_out : out_channel -> int64 = "caml_ml_pos_out_64"
+external out_channel_length : out_channel -> int64
+                            = "caml_ml_channel_size_64"
+external seek_in : in_channel -> int64 -> unit = "caml_ml_seek_in_64"
+external pos_in : in_channel -> int64 = "caml_ml_pos_in_64"
+external in_channel_length : in_channel -> int64 = "caml_ml_channel_size_64"
+external sys_exit : int -> 'a = "caml_sys_exit"
+*/
+inline ocaml_value_t caml_ml_set_channel_name(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_set_channel_name unimplemented"); }
+inline ocaml_value_t caml_ml_flush(ocaml_value_t v) { assert(false && "caml_ml_flush unimplemented"); }
+inline ocaml_value_t caml_ml_out_channels_list(ocaml_value_t v) { assert(false && "caml_ml_out_channels_list unimplemented"); }
+
+inline ocaml_value_t caml_ml_output(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3, ocaml_value_t v4) { assert(false && "caml_ml_output unimplemented"); }
+inline ocaml_value_t caml_ml_output_char(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_output_char unimplemented"); }
+inline ocaml_value_t caml_ml_output_int(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_output_int unimplemented"); }
+inline ocaml_value_t caml_output_value(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3) { assert(false && "caml_ml_output_value unimplemented"); }
+
+inline ocaml_value_t caml_ml_input(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3, ocaml_value_t v4) { assert(false && "caml_ml_input unimplemented"); }
+inline ocaml_value_t caml_ml_input_scan_line(ocaml_value_t v) { assert(false && "caml_ml_input_scan_line unimplemented"); }
+inline ocaml_value_t caml_ml_input_char(ocaml_value_t v) { assert(false && "caml_ml_input_char unimplemented"); }
+inline ocaml_value_t caml_ml_input_int(ocaml_value_t v) { assert(false && "caml_ml_input_int unimplemented"); }
+inline ocaml_value_t caml_input_value(ocaml_value_t v) { assert(false && "caml_input_value unimplemented"); }
+
+inline ocaml_value_t caml_ml_close_channel(ocaml_value_t v) { assert(false && "caml_ml_close_channel unimplemented"); }
+inline ocaml_value_t caml_ml_set_binary_mode(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_set_binary_mode unimplemented"); }
+
+inline ocaml_value_t caml_ml_seek_in(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_seek_in unimplemented"); }
+inline ocaml_value_t caml_ml_pos_in(ocaml_value_t v) { assert(false && "caml_ml_pos_in unimplemented"); }
+inline ocaml_value_t caml_ml_seek_out(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_seek_out unimplemented"); }
+inline ocaml_value_t caml_ml_pos_out(ocaml_value_t v) { assert(false && "caml_ml_pos_out unimplemented"); }
+inline ocaml_value_t caml_ml_channel_size(ocaml_value_t v) { assert(false && "caml_ml_channel_size unimplemented"); }
+
+inline ocaml_value_t caml_ml_seek_in_64(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_seek_in_64 unimplemented"); }
+inline ocaml_value_t caml_ml_pos_in_64(ocaml_value_t v) { assert(false && "caml_ml_pos_in_64 unimplemented"); }
+inline ocaml_value_t caml_ml_seek_out_64(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_seek_out_64 unimplemented"); }
+inline ocaml_value_t caml_ml_pos_out_64(ocaml_value_t v) { assert(false && "caml_ml_pos_out_64 unimplemented"); }
+inline ocaml_value_t caml_ml_channel_size_64(ocaml_value_t v) { assert(false && "caml_ml_channel_size_64 unimplemented"); }
+
+inline ocaml_value_t caml_sys_exit(ocaml_value_t v) {
+    exit(v.i);
+}
 
 #endif
