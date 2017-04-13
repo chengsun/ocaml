@@ -265,13 +265,37 @@ open C
 
 
 module Emitcode = struct
+  exception Not_valid_c99
+  (* translate a string to a valid C99 identifier *)
+  let fixid str =
+    let valid_char chr =
+      chr >= 'a' && chr <= 'z' ||
+      chr >= 'A' && chr <= 'Z' ||
+      chr >= '0' && chr <= '9' ||
+      chr == '_'
+    in
+    try
+      String.iter (fun chr -> if valid_char chr then () else raise Not_valid_c99) str;
+      (* just return the original if everything's ok (fast path) *)
+      str
+    with Not_valid_c99 -> begin
+      let valid_str = ref "" in
+      String.iter (fun chr ->
+        let valid_chr =
+          if valid_char chr then String.make 1 chr else Printf.sprintf "_u%04x_" (Char.code chr)
+        in
+        valid_str := !valid_str ^ valid_chr
+      ) str;
+      !valid_str
+    end
+
   let cstruct_defn_string id fields =
     let fieldstrings =
       map_intersperse_concat (fun (ctype, fieldname) ->
         Printf.sprintf "%s %s;" (ctype_to_string ctype) fieldname
       ) "\n" fields
     in
-    Printf.sprintf "struct %s {\n%s\n};\n" (Ident.unique_name id) fieldstrings
+    Printf.sprintf "struct %s {\n%s\n};\n" (fixid (Ident.unique_name id)) fieldstrings
 
   let ctype_defn_string = function
     | C_Struct (id, fields) -> cstruct_defn_string id fields
@@ -287,13 +311,13 @@ module Emitcode = struct
     | FunDefn (retty, name, args, sl) ->
           Printf.sprintf "/*FIXME:fun %s %s (%s)*/{\n%s\n}"
             (ctype_to_string retty)
-            (Ident.unique_name name)
+            (fixid (Ident.unique_name name))
             (map_intersperse_concat (fun (t,id) -> (ctype_and_identifier_to_string t (C_Variable id))) ", " args)
             (rev_statements_to_string sl)
     | VarDefn (ty, name, e, sl) ->
           Printf.sprintf "/*FIXME:var %s %s = */%s%s"
             (ctype_to_string ty)
-            (Ident.unique_name name)
+            (fixid (Ident.unique_name name))
             (expression_to_string e)
             (match sl with [] -> "" | _ -> Printf.sprintf " /*THEN*/ {\n%s\n}" (rev_statements_to_string sl))
 
@@ -308,7 +332,7 @@ module Emitcode = struct
     | C_StringLiteral str -> Printf.sprintf "%S" str
     | C_CharLiteral ch -> Printf.sprintf "%C" ch
     | C_GlobalVariable id -> id
-    | C_Variable id -> Ident.unique_name id
+    | C_Variable id -> fixid (Ident.unique_name id)
     | C_Field (e,f) -> Printf.sprintf "%s.%s" (expression_to_string e) f
     | C_ArrayIndex (e,i) -> Printf.sprintf "%s[%s]" (expression_to_string e) (expression_to_string i)
     | C_InitialiserList es -> Printf.sprintf "{%s}" (map_intersperse_concat expression_to_string ", " es)
@@ -347,8 +371,8 @@ module Emitcode = struct
     | C_ForInt (p,lo,plim,hi,dir,sl) ->
         (* need hi to be inclusive! *)
         Printf.sprintf "for (int64_t %s = %s, %s = %s; %s; %s) {\n%s\n}"
-        (Ident.unique_name p) (expression_to_string lo)
-        (Ident.unique_name plim) (expression_to_string hi)
+        (fixid (Ident.unique_name p)) (expression_to_string lo)
+        (fixid (Ident.unique_name plim)) (expression_to_string hi)
         (expression_to_string (C_BinaryOp ((match dir with Upto -> "<=" | Downto -> ">="), C_Variable p, C_Variable plim)))
         (expression_to_string (C_UnaryOp ((match dir with Upto -> "++" | Downto -> "--"), C_Variable p)))
         (map_intersperse_concat statement_to_string "\n" (List.rev sl))
@@ -372,7 +396,7 @@ module Emitcode = struct
         Printf.sprintf "extern %s;" (ctype_and_identifier_to_string t id)
     | C_FunDefn (t,id,args,xs_option) ->
         (ctype_and_identifier_to_string t id) ^ "(" ^
-        (map_intersperse_concat (fun (t,id) -> (ctype_to_string t) ^ " " ^ (Ident.unique_name id)) ", " args) ^ ")" ^
+        (map_intersperse_concat (fun (t,id) -> (ctype_to_string t) ^ " " ^ (fixid (Ident.unique_name id))) ", " args) ^ ")" ^
         ( match xs_option with
           | None -> ";"
           | Some xs -> " {\n" ^ (rev_statements_to_string xs) ^ "\n}"
