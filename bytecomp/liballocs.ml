@@ -864,6 +864,17 @@ and lambda_to_texpression lam : C.texpression =
           end
       | Popaque, [lam] ->
           lambda_to_texpression lam
+      | Pdirapply loc, [func;arg]
+      | Prevapply loc, [arg;func] ->
+          lambda_to_texpression (Lapply
+            { ap_should_be_tailcall=false;
+              ap_loc=loc;
+              ap_func=func;
+              ap_args=[arg];
+              ap_inlined=Default_inline;
+              ap_specialised=Default_specialise
+            }
+          )
       | Pgetglobal id, [] ->
           VarLibrary.ctype varlib id, C_GlobalVariable (Ident.name id)
       | Pfield i, [lam] ->
