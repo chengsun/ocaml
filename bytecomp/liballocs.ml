@@ -777,6 +777,9 @@ and structured_constant_to_texpression = function
     (* we'll recurse back into this function eventually *)
   | konst -> failwith (Printf.sprintf "structured_constant_to_texpression: unknown constant type %s" (formats Printlambda.structured_constant konst))
 
+(* processes a call to a function (apfunc_actual_ctype, c_ap_func)
+ * with return type ret_ctype, and arg_ctypes describing the types necessary for texpr_ap_args to be casted to before applying to the function.
+ * note that ret_ctype and arg_ctypes are not redundant with apfunc_actual_ctype, e.g. in the case when apfunc_actual_ctype describes a VarArgs function, arg_ctypes will explicitly and individually describe the actual types *)
 and lapply_to_texpression (apfunc_actual_ctype, c_ap_func) ret_ctype arg_ctypes texpr_ap_args =
   let n_args_actual = List.length arg_ctypes in
   let n_args_applied = List.length texpr_ap_args in
