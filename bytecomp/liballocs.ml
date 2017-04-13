@@ -1234,8 +1234,9 @@ and fixup_expression t accum e = (* sticks inlined statements on the front of ac
             let (accum', e') = fixup_expression tf accum e in
             loop accum' (e'::es') es
       in
-      let (accum', es') = loop accum [] es in
-      accum', C_FunCall (id,es')
+      let (accum', id') = fixup_expression tf accum id in
+      let (accum'', es') = loop accum' [] es in
+      accum'', C_FunCall (id',es')
 
 and fixup_rev_statements t accum sl = (* sticks fixed up sl on the front of accum *)
   let tf = { t with global_scope = false } in
