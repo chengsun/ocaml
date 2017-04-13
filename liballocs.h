@@ -112,7 +112,11 @@ static ocaml_value_t caml_int64_compare(ocaml_value_t v1, ocaml_value_t v2) { as
 external register_named_value : string -> 'a -> unit
                               = "caml_register_named_value"
 */
-static ocaml_value_t caml_register_named_value(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_register_named_value unimplemented"); }
+static ocaml_value_t caml_register_named_value(ocaml_value_t v1, ocaml_value_t v2) {
+    // TODO: doesn't need to do anything right now
+    // assert(false && "caml_register_named_value unimplemented");
+    return (ocaml_value_t){.i = 0};
+}
 
 /*
 external ( ** ) : float -> float -> float = "caml_power_float" "pow"
@@ -199,8 +203,16 @@ external open_descriptor_out : int -> out_channel
 external open_descriptor_in : int -> in_channel = "caml_ml_open_descriptor_in"
 external open_desc : string -> open_flag list -> int -> int = "caml_sys_open"
 */
-static ocaml_value_t caml_ml_open_descriptor_out(ocaml_value_t v) { assert(false && "caml_ml_open_descriptor_out unimplemented"); }
-static ocaml_value_t caml_ml_open_descriptor_in (ocaml_value_t v) { assert(false && "caml_ml_open_descriptor_in unimplemented"); }
+static ocaml_value_t caml_ml_open_descriptor_out(ocaml_value_t v) {
+    // TODO: doesn't need to do anything right now
+    // assert(false && "caml_ml_open_descriptor_out unimplemented");
+    return (ocaml_value_t){.i = 0};
+}
+static ocaml_value_t caml_ml_open_descriptor_in (ocaml_value_t v) {
+    // TODO: doesn't need to do anything right now
+    // assert(false && "caml_ml_open_descriptor_in unimplemented");
+    return (ocaml_value_t){.i = 0};
+}
 static ocaml_value_t caml_sys_open(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3) { assert(false && "caml_ml_open_desc unimplemented"); }
 
 
