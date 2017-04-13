@@ -14,7 +14,7 @@ for ml in $TESTS; do
     echo ">>> Testing ${name}..."
     cp ./tests/${name}.ml /tmp/test.ml
     OCAMLRUNPARAM=b ./ocamlc -target-liballocs -o /dev/null -g /tmp/test.ml
-    gcc -ggdb -std=c99 -Wall -Wno-unused -I. -o /tmp/test ./liballocs.c /tmp/test.c
+    gcc -ggdb -std=c99 -Wall -Wno-unused -I. -o /tmp/test ./liballocs.c /tmp/test.c -lm
     output=$(/tmp/test 2>&1) || true
     echo "$output" | diff -u /dev/stdin ./tests/${name}.expected || (echo ">>> Test failed!"; exit 1)
 done

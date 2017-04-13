@@ -2,6 +2,7 @@
 #define OCAML_LIBALLOCS_H
 
 #include <assert.h>
+#include <math.h>
 #include <stdlib.h>    // for malloc
 #include <stdint.h>
 #include <stdbool.h>
@@ -164,6 +165,88 @@ external ldexp : (float [@unboxed]) -> (int [@untagged]) -> (float [@unboxed]) =
   "caml_ldexp_float" "caml_ldexp_float_unboxed" [@@noalloc]
 external modf : float -> float * float = "caml_modf_float"
 */
+static ocaml_value_t caml_power_float(ocaml_value_t v1, ocaml_value_t v2) {
+    return (ocaml_value_t){.d = pow(v1.d, v2.d)};
+}
+static ocaml_value_t caml_exp_float(ocaml_value_t v1) {
+    return (ocaml_value_t){.d = exp(v1.d)};
+}
+static ocaml_value_t caml_expm1_float(ocaml_value_t v1) {
+    assert (false && "unimplemented");
+    return (ocaml_value_t){.d = 0.0};
+}
+static ocaml_value_t caml_acos_float(ocaml_value_t v1) {
+    return (ocaml_value_t){.d = acos(v1.d)};
+}
+static ocaml_value_t caml_asin_float(ocaml_value_t v1) {
+    return (ocaml_value_t){.d = asin(v1.d)};
+}
+static ocaml_value_t caml_atan_float(ocaml_value_t v1) {
+    return (ocaml_value_t){.d = atan(v1.d)};
+}
+static ocaml_value_t caml_atan2_float(ocaml_value_t v1, ocaml_value_t v2) {
+    return (ocaml_value_t){.d = atan2(v1.d, v2.d)};
+}
+static ocaml_value_t caml_hypot_float(ocaml_value_t v1, ocaml_value_t v2) {
+    assert (false && "unimplemented");
+    return (ocaml_value_t){.d = 0.0};
+}
+static ocaml_value_t caml_cos_float(ocaml_value_t v1) {
+    return (ocaml_value_t){.d = cos(v1.d)};
+}
+static ocaml_value_t caml_cosh_float(ocaml_value_t v1) {
+    return (ocaml_value_t){.d = cosh(v1.d)};
+}
+static ocaml_value_t caml_log_float(ocaml_value_t v1) {
+    return (ocaml_value_t){.d = log(v1.d)};
+}
+static ocaml_value_t caml_log10_float(ocaml_value_t v1) {
+    return (ocaml_value_t){.d = log10(v1.d)};
+}
+static ocaml_value_t caml_log1p_float(ocaml_value_t v1) {
+    assert (false && "unimplemented");
+    return (ocaml_value_t){.d = 0.0};
+}
+static ocaml_value_t caml_sin_float(ocaml_value_t v1) {
+    return (ocaml_value_t){.d = sin(v1.d)};
+}
+static ocaml_value_t caml_sinh_float(ocaml_value_t v1) {
+    return (ocaml_value_t){.d = sinh(v1.d)};
+}
+static ocaml_value_t caml_sqrt_float(ocaml_value_t v1) {
+    return (ocaml_value_t){.d = sqrt(v1.d)};
+}
+static ocaml_value_t caml_tan_float(ocaml_value_t v1) {
+    return (ocaml_value_t){.d = tan(v1.d)};
+}
+static ocaml_value_t caml_tanh_float(ocaml_value_t v1) {
+    return (ocaml_value_t){.d = tanh(v1.d)};
+}
+static ocaml_value_t caml_ceil_float(ocaml_value_t v1) {
+    return (ocaml_value_t){.d = ceil(v1.d)};
+}
+static ocaml_value_t caml_floor_float(ocaml_value_t v1) {
+    return (ocaml_value_t){.d = floor(v1.d)};
+}
+static ocaml_value_t caml_copysign_float(ocaml_value_t v1, ocaml_value_t v2) {
+    assert (false && "unimplemented");
+    return (ocaml_value_t){.d = 0.0};
+}
+static ocaml_value_t caml_fmod_float(ocaml_value_t v1, ocaml_value_t v2) {
+    return (ocaml_value_t){.d = fmod(v1.d, v2.d)};
+}
+static ocaml_value_t caml_frexp_float(ocaml_value_t v1) {
+    assert (false && "unimplemented");
+    return (ocaml_value_t){.d = 0.0};
+}
+static ocaml_value_t caml_ldexp_float(ocaml_value_t v1, ocaml_value_t v2) {
+    assert (false && "unimplemented");
+    return (ocaml_value_t){.d = 0.0};
+}
+static ocaml_value_t caml_modf_float(ocaml_value_t v1) {
+    assert (false && "unimplemented");
+    return (ocaml_value_t){.d = 0.0};
+}
 
 /*
 external float_of_bits : int64 -> float = "caml_int64_float_of_bits"
