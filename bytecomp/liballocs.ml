@@ -817,7 +817,7 @@ and lapply_to_texpression (apfunc_actual_ctype, c_ap_func) ret_ctype arg_ctypes 
     ])
   end else begin
     (* over-application: apply all that we can, and then recurse *)
-    failwith "unimplemented"
+    failwith "over-application unimplemented"
   end
 
 and lambda_to_texpression lam : C.texpression =
