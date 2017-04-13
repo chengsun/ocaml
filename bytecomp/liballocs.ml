@@ -777,6 +777,46 @@ and structured_constant_to_texpression = function
     (* we'll recurse back into this function eventually *)
   | konst -> failwith (Printf.sprintf "structured_constant_to_texpression: unknown constant type %s" (formats Printlambda.structured_constant konst))
 
+and lapply_to_texpression (apfunc_actual_ctype, c_ap_func) ret_ctype arg_ctypes texpr_ap_args =
+  let n_args_actual = List.length arg_ctypes in
+  let n_args_applied = List.length texpr_ap_args in
+  if n_args_applied = n_args_actual then begin
+    (* complete application *)
+    let cargs =
+      List.map2 (fun ctype texpr -> cast ctype texpr) arg_ctypes texpr_ap_args
+    in
+    ret_ctype, C_FunCall (c_ap_func, cargs)
+  end else if n_args_applied < n_args_actual then begin
+    (* partial application *)
+    Printf.printf "we have %d actual args, but %d provided\n" n_args_actual n_args_applied;
+    let arg_ctypes_and_ids =
+      List.mapi (fun i ctype -> ctype, Ident.create (Printf.sprintf "arg%d" i))
+        arg_ctypes
+    in
+    let arg_ctypes_and_ids_env, arg_ctypes_and_ids_params =
+      list_splitat n_args_applied arg_ctypes_and_ids
+    in
+    let env_mapping =
+      List.map2 (fun (arg_ctype, id) texpr -> (id, (arg_ctype, cast arg_ctype texpr)))
+        arg_ctypes_and_ids_env texpr_ap_args
+    in
+
+    (* also add in the function to call into environment -- this is necessary as it might not be globally accessible (e.g. it itself is a closure) *)
+    let the_func_id = Ident.create "_func" in
+    let mapping = (the_func_id, (apfunc_actual_ctype, c_ap_func)) :: env_mapping in
+
+    let cbody = [ C_Return (Some (C_FunCall (C_Variable the_func_id, List.map (fun (_, id) -> C_Variable id) arg_ctypes_and_ids))) ] in
+    let letdefs_prelim, (ctype, closure_expr) =
+      tclosurify "_partialapp" mapping ret_ctype arg_ctypes_and_ids_params cbody
+    in
+    ctype, C_InlineRevStatements (ctype, [
+      C_Expression closure_expr ; C_LetStatement letdefs_prelim
+    ])
+  end else begin
+    (* over-application: apply all that we can, and then recurse *)
+    failwith "unimplemented"
+  end
+
 and lambda_to_texpression lam : C.texpression =
   match lam with
   | Levent (body, ev) ->
@@ -928,35 +968,7 @@ and lambda_to_texpression lam : C.texpression =
     in
     let c_ap_func = cast apfunc_actual_ctype (ctype, expr) in
     let texpr_ap_args = List.map lambda_to_texpression ap_args in
-    let n_args_actual = List.length arg_ctypes in
-    let n_args_applied = List.length ap_args in
-    if n_args_applied = n_args_actual then begin
-      (* complete application *)
-      let cargs =
-        List.map2 (fun ctype texpr -> cast ctype texpr) arg_ctypes texpr_ap_args
-      in
-      ret_ctype, C_FunCall (c_ap_func, cargs)
-    end else begin
-      (* partial_application *)
-      let arg_ctypes_and_ids =
-        List.mapi (fun i ctype -> ctype, Ident.create (Printf.sprintf "arg%d" i))
-          arg_ctypes
-      in
-      let arg_ctypes_and_ids_env, arg_ctypes_and_ids_params =
-        list_splitat n_args_applied arg_ctypes_and_ids
-      in
-      let env_mapping =
-        List.map2 (fun (arg_ctype, id) texpr -> (id, (arg_ctype, cast arg_ctype texpr)))
-          arg_ctypes_and_ids_env texpr_ap_args
-      in
-      let cbody = [ C_Return (Some (C_FunCall (c_ap_func, List.map (fun (_, id) -> C_Variable id) arg_ctypes_and_ids))) ] in
-      let letdefs_prelim, (ctype, closure_expr) =
-        tclosurify "_partialapp" env_mapping ret_ctype arg_ctypes_and_ids_params cbody
-      in
-      ctype, C_InlineRevStatements (ctype, [
-        C_Expression closure_expr ; C_LetStatement letdefs_prelim
-      ])
-    end
+    lapply_to_texpression (apfunc_actual_ctype, c_ap_func) ret_ctype arg_ctypes texpr_ap_args
   | _ ->
     (* fall back to trying full blown statements *)
     let ctype, rev_st = lambda_to_trev_statements lam in
