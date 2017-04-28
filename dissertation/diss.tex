@@ -66,7 +66,7 @@ Churchill College \\[5mm]
 \begin{tabular}{ll}
 Name:               & \bf Cheng Sun                       \\
 College:            & \bf Churchill College                     \\
-Project Title:      & \bf An observable OCaml via C and liballocs \\
+Project Title:      & \bf An observable OCaml via C and \lstinline!liballocs! \\
 Examination:        & \bf Computer Science Tripos -- Part II, July 2017  \\
 Word Count:         & \bf 1587\footnotemark[1] \\
 Project Originator: & Stephen Kell                    \\
@@ -151,7 +151,76 @@ extent for a comparable purpose.
 
 \chapter{Implementation}
 
-%TODO
+\section{Closures}
+
+\subsection{Runtime support}
+
+This consists of a function \lstinline{ocaml_liballocs_close(fun, n_args, env)}
+which dynamically creates a 3-instruction stub in an executable buffer,
+returning what looks like a closed function pointer f. Calling
+\lstinline{f(1, 2, 3)}
+(with the standard C calling convention) transparently causes a call to
+\lstinline{fun(1, 2, 3, env)}.
+Note that this won't work on anything but 64-bit Linux.
+
+Note that this code must be written to a memory page which has executable permissions. (This has security implications which mean that additional precautionary steps must be taken in production code. For my prototype it works fine.)
+
+This area of memory is bump allocated. Note that a garbage collector would need to know about this.
+
+\subsubsection{Closing functions that take $\le 5$ arguments}
+
+This is the stub (when \lstinline{n_args} $\le 5$):
+
+\begin{lstlisting}
+mov REG_ENV, <env>
+mov r10, <fun>
+jmp r10
+\end{lstlisting}
+
+This works by writing the two 8-byte addresses directly into the machine code, and using immediate \lstinline{mov} instructions to load them into the required registers. Then the function is tail-called into.
+
+This is what the stack transformation looks like: % TODO
+
+\begin{tabular}{ c | c }
+  \lstinline!n_args! & \lstinline!REG_ENV! \\
+  \hline
+  0 & \lstinline!rdi! \\
+  1 & \lstinline!rsi! \\
+  2 & \lstinline!rdx! \\
+  3 & \lstinline!rcx! \\
+  4 & \lstinline!r8! \\
+  5 & \lstinline!r9! \\
+  $> 5$ & passed on stack instead (see below) \\
+\end{tabular}
+
+\subsubsection{Closing functions that take $> 5$ arguments}
+
+When \lstinline{n_args} $> 5$, env needs to get passed in on the stack instead.
+This is a little awkward because:
+\begin{enumerate}
+  \item our stub needs to clean up after itself -- it can no longer just tail-call into fun. This means that we need to return back into our closure, but the original return address needs to be preserved somehow;
+  \item we need to somehow tuck \lstinline{env} in under the return address stack slot, which would require an annoying amount of stack twiddling.
+\end{enumerate}
+
+Luckily, I came up with a neat trick which mitigates both issues and remains performant. We can get away with just pushing \lstinline{env} on top (forming the (\lstinline{n_args}${}+2$)th argument), and pretending the return address is actually an argument (\lstinline{n_args}${}+1$)!
+
+This is what the stack transformation looks like: % TODO
+
+\begin{lstlisting}
+mov r11, env
+push r11
+mov r10, fun
+call r10
+pop rcx
+ret
+\end{lstlisting}
+
+This works because our compiler has control over the function signature of
+\lstinline{f}
+-- so in this case it'll just insert an additional \lstinline{void *ignored} argument before \lstinline{env}.
+
+Note also the deliberate choice of \lstinline{pop rcx} to remove the \lstinline{env} address from the stack, instead of the more symmetric \lstinline{pop r11} or more direct \lstinline{add rsp, 8}. This is a size optimisation -- the chosen instruction encodes in just one byte whereas the others require two or more bytes.
+
 
 \chapter{Evaluation}
 
