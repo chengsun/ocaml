@@ -1,0 +1,140 @@
+\documentclass[12pt,twoside,a4paper]{article}
+
+\usepackage[pdfborder={0 0 0}]{hyperref}
+\usepackage[margin=25mm]{geometry}
+\usepackage{parskip}
+
+\usepackage{a4}             % Adjust margins for A4 media
+
+\usepackage{lastpage}       % "n of m" page numbering
+\usepackage{lscape}         % Makes landscape easier
+%\usepackage{portland}       % Switch between portrait and landscape
+\usepackage[usenames,dvipsnames,svgnames,table]{xcolor}         % X11 colour names
+\usepackage{graphics}       % Graphics commands
+\usepackage{wrapfig}        % Wrapping text around figures
+\usepackage{epsfig}         % Embed encapsulated postscript
+\usepackage{rotating}       % Extra graphics rotation
+%\usepackage{tables}         % Tabular environments
+\usepackage{longtable}      % Page breaks within tables
+\usepackage{supertabular}   % Page breaks within tables
+\usepackage{multicol}       % Allows table cells to span cols
+\usepackage{multirow}       % Allows table cells to span rows
+%\usepackage{texnames}       % Macros for common tex names
+%\usepackage{trees}          % Tree-like layout
+\usepackage{mdframed}       % frames around paragraphs
+
+\usepackage{listings}       % Source code listings
+\usepackage{courier}        % courier font
+\lstset{
+  basicstyle=\ttfamily
+, commentstyle=\color{Green}
+, keywordstyle=\bfseries\color{RoyalBlue}
+, showspaces=false
+, showstringspaces=false
+, breaklines=true
+, breakatwhitespace=true
+, framextopmargin=50pt
+, columns=fullflexible,keepspaces
+, escapeinside={(*}{*)}
+%, frame=bottomline
+      }
+\usepackage{array}          % Array environment
+\usepackage[shortlabels]{enumitem}       % fancy enum settings
+\usepackage{url}            % URL formatting
+\usepackage{amsmath}        % American Mathematical Society
+\usepackage{amssymb}        % Maths symbols
+\usepackage{amsthm}         % Theorems
+%\usepackage{mathpartir}     % Proofs and inference rules
+\usepackage{verbatim}       % Verbatim blocks
+\usepackage{fancyvrb}       % Verbatim blocks
+\usepackage{ifthen}         % Conditional processing in tex
+\usepackage{caption}         % \caption*, no colon
+
+\usepackage{graphicx}
+\usepackage{tikz}
+\usepackage[export]{adjustbox} %valign=t
+\usepackage{siunitx}        % non-slanted units in math mode with \SI{1}{\volt}
+\usepackage{nicefrac}          % slanted fractions with \nicefrac{1}{2}
+
+\newcommand*\BitAnd{\mathrel{\&}}
+\newcommand*\BitOr{\mathrel{|}}
+\newcommand*\ShiftLeft{\ll}
+\newcommand*\ShiftRight{\gg}
+\newcommand*\BitNeg{\ensuremath{\mathord{\sim}}}
+\usepackage{mathtools}
+\DeclarePairedDelimiter{\ceil}{\lceil}{\rceil}
+\mathtoolsset{showonlyrefs=true} % show only eq refs that are used
+
+\usepackage{float}
+
+\renewcommand{\thispagestyle}[1]{}
+
+\setlength{\parindent}{0em}
+
+\begin{document}
+
+\begin{center}
+\Large CST Part II Project -- Progress Report
+\\[4mm]
+\LARGE \bfseries An observable OCaml, via C and \lstinline{liballocs} \mdseries
+\\[4mm]
+
+\large
+Cheng Sun \lstinline{<cs799@cam.ac.uk>}
+
+\makeatletter
+\@date
+\makeatother
+
+\end{center}
+
+\vspace{5mm}
+
+\textbf{Project Supervisor:} Stephen Kell
+
+\textbf{Director of Studies:} John Fawcett
+
+\textbf{Project Overseers:} Timothy Griffin \& Pietro Lio
+
+
+\section*{Progress}
+
+My project has been progressing well. All of the code I have written so far has been in OCaml, with the exception of portions of the stdlib that the generated C code has to link with. I have completed/made significant progress in the following:
+
+\begin{itemize}
+  \item AST datatypes for the C language, representing statements and toplevel definitions.
+
+  \item
+Translation module, translating OCaml lambda IR into ``extended'' C AST.
+
+This is now capable of translating basic types like ints, booleans, tuples; references; lists; functions and complete function application; polymorphic functions; linking against and accessing values in other modules.
+
+  \item
+Fixup module, taking an ``extended'' C AST to a standard C AST, normalising invalid expressions that are created during translation.
+
+%Every expression in OCaml can be used as a value, for example in constructs such as \lstinline[language=ML]{let x = (if a then b else c)}. However, the same is not valid in C, so this cannot be directly translated to \lstinline[language=C]|int x = if (a) {b} else {c}|. My ``extended'' C AST allows the translation module to generate such constructs (amongst others); it is the role of the recursive fixup pass to eliminate them before code emission.
+
+  \item 
+Emitcode module, transforming the C AST into a string representing the C code, and subsequently outputting this as a file.
+
+  \item 
+    OCaml compiler driver changes: added a new flag \lstinline{-target-liballocs} which enables my backend.
+
+\item
+  Started a prototype standard library, initially supporting \lstinline[language=ML]{Printf.printf}.
+
+\item
+Started writing my own corpus of self-contained OCaml files for testing purposes. These generally perform a mathematical computation of some sort, which can be verified/benchmarked.
+
+\end{itemize}
+
+I estimate that I am currently 1--2 weeks behind in my project, due to some personal time management issues last term (outlined below). However, whilst I have been working on it, my project has been progressing very quickly, and I am confident about being able to catch up with where I want to be by the end of this month. Hence, I do not need to make any changes to my project plan.
+
+
+\section*{Difficulties}
+
+Time allocation during Michaelmas was more difficult than anticipated, and I ended up not starting my project in earnest until the term had ended. However, I managed to catch up rapidly, and the project is in far better shape now. As I am attending fewer courses in Lent, this term will allow more time for me to focus on project work.
+
+It turned out that there was no perfect choice of Intermediate Representation in the compiler which immediately satisfied all of my needs. I ended up choosing to start with the so-called ``lambda'' IR, which is based on a (heavily augmented) untyped lambda calculus. This has been suitable for C translation purposes, as most constructs have a fairly direct mapping. However, I will need type information later in the project, which this IR does not provide. I'm working on extracting this information from typing environments instead.
+
+\end{document}

@@ -328,3 +328,14 @@
 /yacc/ocamlyacc
 /yacc/version.h
 /yacc/.gdb_history
+
+
+/dissertation/*.aux
+/dissertation/*.lof
+/dissertation/*.log
+/dissertation/*.nav
+/dissertation/*.pdf
+/dissertation/*.snm
+/dissertation/*.synctex.gz
+/dissertation/*.toc
+/dissertation/*.vrb

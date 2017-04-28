@@ -1,0 +1,324 @@
+\documentclass[12pt,twoside,a4paper]{article}
+
+\usepackage[pdfborder={0 0 0}]{hyperref}
+\usepackage[margin=25mm]{geometry}
+\usepackage{parskip}
+
+\usepackage{a4}             % Adjust margins for A4 media
+
+\usepackage{lastpage}       % "n of m" page numbering
+\usepackage{lscape}         % Makes landscape easier
+%\usepackage{portland}       % Switch between portrait and landscape
+\usepackage[usenames,dvipsnames,svgnames,table]{xcolor}         % X11 colour names
+\usepackage{graphics}       % Graphics commands
+\usepackage{wrapfig}        % Wrapping text around figures
+\usepackage{epsfig}         % Embed encapsulated postscript
+\usepackage{rotating}       % Extra graphics rotation
+%\usepackage{tables}         % Tabular environments
+\usepackage{longtable}      % Page breaks within tables
+\usepackage{supertabular}   % Page breaks within tables
+\usepackage{multicol}       % Allows table cells to span cols
+\usepackage{multirow}       % Allows table cells to span rows
+%\usepackage{texnames}       % Macros for common tex names
+%\usepackage{trees}          % Tree-like layout
+\usepackage{mdframed}       % frames around paragraphs
+
+\usepackage{listings}       % Source code listings
+\usepackage{courier}        % courier font
+\lstset{
+  basicstyle=\ttfamily
+, commentstyle=\color{Green}
+, keywordstyle=\bfseries\color{RoyalBlue}
+, showspaces=false
+, showstringspaces=false
+, breaklines=true
+, breakatwhitespace=true
+, framextopmargin=50pt
+, columns=fullflexible,keepspaces
+, escapeinside={(*}{*)}
+%, frame=bottomline
+      }
+\usepackage{array}          % Array environment
+\usepackage[shortlabels]{enumitem}       % fancy enum settings
+\usepackage{url}            % URL formatting
+\usepackage{amsmath}        % American Mathematical Society
+\usepackage{amssymb}        % Maths symbols
+\usepackage{amsthm}         % Theorems
+%\usepackage{mathpartir}     % Proofs and inference rules
+\usepackage{verbatim}       % Verbatim blocks
+\usepackage{fancyvrb}       % Verbatim blocks
+\usepackage{ifthen}         % Conditional processing in tex
+\usepackage{caption}         % \caption*, no colon
+
+\usepackage{graphicx}
+\usepackage{tikz}
+\usepackage[export]{adjustbox} %valign=t
+\usepackage{siunitx}        % non-slanted units in math mode with \SI{1}{\volt}
+\usepackage{nicefrac}          % slanted fractions with \nicefrac{1}{2}
+
+\newcommand*\BitAnd{\mathrel{\&}}
+\newcommand*\BitOr{\mathrel{|}}
+\newcommand*\ShiftLeft{\ll}
+\newcommand*\ShiftRight{\gg}
+\newcommand*\BitNeg{\ensuremath{\mathord{\sim}}}
+\usepackage{mathtools}
+\DeclarePairedDelimiter{\ceil}{\lceil}{\rceil}
+\mathtoolsset{showonlyrefs=true} % show only eq refs that are used
+
+\usepackage{float}
+
+\renewcommand{\thispagestyle}[1]{}
+
+\setlength{\parindent}{0em}
+
+\begin{document}
+
+\begin{center}
+\Large Computer Science Tripos -- Part II -- Project Proposal
+\\[4mm]
+\LARGE \bfseries An observable OCaml, via C and \lstinline{liballocs} \mdseries
+\\[4mm]
+
+\large
+Cheng Sun, Churchill College
+
+Originator: Stephen Kell
+
+\makeatletter
+\@date
+\makeatother
+
+\end{center}
+
+\vspace{5mm}
+
+\textbf{Project Supervisor:} Stephen Kell
+
+\textbf{Director of Studies:} John Fawcett
+
+\textbf{Project Overseers:} Timothy Griffin \& Pietro Lio
+
+
+\section*{Introduction}
+
+OCaml is one of the most commonly used members of the ML family of functional languages. It is popular for its expressivity, type system and performance. However, there is not as of yet a good story for debugging OCaml programs, and observing their behaviour at runtime.
+
+The OCaml bytecode debugger, \lstinline{ocamldebug}, forms part of the core OCaml toolchain. One major problem is that \lstinline{ocamldebug} is unable to ``see through'' polymorphism. For instance, suppose we would like to debug the following polymorphic list-reverse function, which has type \lstinline{'a list -> 'a list}:
+
+\begin{lstlisting}
+let my_rev lst =
+  match lst with
+  | [] -> []
+  | x::xs -> List.append xs [x]
+
+let result = my_rev [1; 2; 3]
+\end{lstlisting}
+
+Now let's try to debug the function with \lstinline{ocamldebug}.
+
+\begin{lstlisting}
+$ (*\aftergroup\bfseries*)ocamlc -g -o my_rev my_rev.ml(*\aftergroup\mdseries*)
+$ (*\aftergroup\bfseries*)ocamldebug my_rev(*\aftergroup\mdseries*)
+        OCaml Debugger version 4.02.3
+
+(ocd) (*\aftergroup\bfseries*)break @ My_rev 1(*\aftergroup\mdseries*)
+Loading program... done.
+Breakpoint 1 at 21600: file my_rev.ml, line 2, characters 3-62
+(ocd) (*\aftergroup\bfseries*)run(*\aftergroup\mdseries*)
+Time: 12 - pc: 21600 - module My_rev
+Breakpoint: 1
+2   <|b|>match lst with
+(ocd) (*\aftergroup\bfseries*)print lst(*\aftergroup\mdseries*)
+lst: 'a list = [<poly>; <poly>; <poly>]
+\end{lstlisting}
+
+Note that \lstinline{ocamldebug} is unable to display the contents of the input list, as it does not know the concrete type that the type variable \lstinline{'a} is instantiated with for this invocation.
+
+There are many other deficiencies with the OCaml debugger, mostly stemming from its immaturity and lack of features. These issues mean that when debugging OCaml code, one often has to resort to ``printf debugging'' instead.
+
+The aim of this project is to investigate whether the experience of debugging and observing the runtime behaviour of OCaml programs could be improved by utilising the mature C toolchain. My goal is to write a translator that compiles OCaml code into equivalent C code, whilst maintaining a well-defined mapping between the two (in terms of variable names, types, and so on). A user will then be able to debug their OCaml program by using (perhaps an augmented) \lstinline{gdb} on the generated C code.
+
+In order to solve the problem of ``seeing through'' polymorphism, I will use a library written by my supervisor, \lstinline{liballocs}, which keeps track of runtime allocation metadata (including their types) with low overhead. This will allow the debugger to inspect the allocation corresponding to the input to \lstinline{my_rev}, for instance, and conclude that it is operating on lists with elements of type \lstinline{int}.
+
+
+\section*{Starting point}
+
+The project will be focused on creating a new ``backend'' for the OCaml
+compiler, so I will build on the existing code of the frontend.
+This includes reusing code for lexing, parsing and typing of OCaml programs, as
+well as the transformation from the typed AST to the Intermediate
+Representation that we will be using as input.
+
+In order to provide a standard library to compile programs against, I will try
+to use as much of the existing OCaml \lstinline{stdlib} as possible. If this
+turns out not to be feasible then I will resort to writing a subset of the
+standard library by hand.
+
+I will use the open-source library \lstinline{liballocs}, written by Stephen Kell.
+This library provides routines to tag regions in virtual memory
+(``allocations'') with run-time type information.
+
+I may also make use of some further open-source libraries such as:
+\begin{itemize}
+  \item \lstinline{libffi} -- a library providing a portable way to perform a call to a function
+with a foreign function interface (such as the closures that I will dynamically
+create at runtime);
+  \item \lstinline{cil} -- a library written in OCaml providing a framework for the manipulation of C programs.
+\end{itemize}
+
+There exists similar prior work \cite{tarditi90} that shows that the overall project concept is feasible. However, I will be making different design choices to the compiler presented in the paper, due to
+differing requirements. For instance, the presented compiler
+generates code that uses continuation-passing style, which I would like to
+avoid doing, as it harms observability -- backtraces would no longer be directly
+meaningful.
+
+
+\section*{Resources required}
+
+The project will primarily be developed on my personal computer
+for convenience. The computer has a 4-core 3.30GHz Intel Xeon
+CPU, a 250GB SSD and 8GB of RAM. I am using Arch Linux. No other non-standard equipment
+is anticipated to be required, and I can easily continue development on
+MCS machines if required.
+
+The project will be synced to a git server (likely GitHub), and backed up
+regularly to my MCS network drive.
+
+The project will utilise various standard open-source software packages,
+including the usual C toolchain (e.g. \lstinline{gcc}, \lstinline{gdb}, \lstinline{make}) along with
+the OCaml compiler. (As mentioned previously, \lstinline{liballocs} requires
+some patches to \lstinline{binutils}, but these can easily be built.)
+
+\section*{Work to be done}
+
+The project can be split up into the following tasks:
+
+\begin{enumerate}
+  \item
+    Performing a study of the starting point (OCaml compiler frontend and \lstinline{liballocs}).
+    This includes an investigation into the forms of the various Intermediate Representations of the OCaml compiler, and selection of the best IR to use as input for our project.
+  \item
+    Choosing a suitable object representation for boxed objects in memory. There are a variety of alternatives to OCaml's own tagged-pointer representation (which leads to awkward 63-bit integers).
+    This choice requires consideration of the garbage collection strategy, even if a GC is not within the core scope of this project.
+  \item
+    Implementing the translation from OCaml IR to C (with \lstinline{liballocs}), for a variety of language features:
+    \begin{enumerate}
+      \item Fundamental types: \lstinline{bool}, \lstinline{int}, \lstinline{float}, \lstinline{list}, \lstinline{ref}, \ldots;
+      \item Tuples and records, which can be implemented using C \lstinline{struct}s;
+      \item (Non-polymorphic) variants, which can be implemented using tagged C \lstinline{union}s;
+      \item Polymorphic types, which can be represented safely using \lstinline{void *}
+        opaque pointers, as downcasts are never required
+        in ML (although \lstinline{liballocs} could provide the necessary information);
+      \item Parametrically polymorphic functions;
+      \item First class functions and closures, which require lambda lifting,
+        or more generally something like the technique of Breuel
+        \cite{breuel88} (dynamically creating an executable stub associated
+        with each closure at runtime).
+    \end{enumerate}
+  \item
+    Integrating a subset of the OCaml \lstinline{stdlib}, or writing my own as necessary.
+  \item
+    Writing a runtime library to support dynamic closure creation.
+  \item
+    Creating a corpus of test and benchmark programs.
+  \item
+    Evaluation, as described in the \textit{Success criteria} section below.
+  \item
+    Extensions as time permits, as described in the \textit{Possible extensions} section below.
+\end{enumerate}
+
+\section*{Success criteria}
+
+My project will have been successful if I have managed to create a OCaml-to-C translator that works on a commonly used subset of the OCaml language (including closures, parametrically polymorphic functions). Furthermore the polymorphism must be able to be seen through (solving the problem highlighted in the \textit{Introduction} section, for instance).
+
+The project will be evaluated in two ways. Both will require a corpus of OCaml tests and micro-benchmarks.
+
+Firstly, I will measure the ``observability'' of the compiled C programs compared with their native and bytecode OCaml counterparts. For instance, one metric would be obtained by interrupting these programs at pre-determined points in the code, and counting the number of local variables that could be recovered from the stack frames. This is an accurate metric for observability, as the utility of debugging is determined almost completely by the amount of state that is visible at a breakpoint.
+
+Secondly, I will measure the performance of the resultant C executables, by timing benchmark programs as compiled by both compilers. As the primary objective of the project is debuggability rather than performance, I do not expect the performance to be anywhere near as good as code generated by the OCaml native-code compiler: I will be satisfied as long as the performance is within a reasonable factor for the majority of use cases. It is still necessary to evaluate performance, because it affects the debuggability of CPU-intensive programs.
+
+There are many other qualitative evaluations that I will also consider, such as the ease of interoperability with C libraries using this approach, the ability to insert instrumentation into the code, and the overall debugging experience when using \lstinline{gdb} on the resultant executables.
+
+\section*{Possible extensions}
+
+\begin{itemize}
+  \item Improving the runtime, such as adding a garbage collector;
+  \item Adding further language and standard library support, to increase the range of programs supported;
+  \item Optimising the performance of the generated program;
+  \item Improving the debugging experience (such as augmenting \lstinline{gdb}).
+\end{itemize}
+
+\section*{Timetable}
+
+\begin{enumerate}
+\item \textbf{Michaelmas weeks 2--3:}
+  Dig into the OCaml compiler frontend; study its Intermediate Representations. Learn to use the \lstinline{liballocs} library.
+
+\item \textbf{Michaelmas weeks 4--6:}
+  Begin work on translator, initially targeting basic features (fundamental types, monomorphic functions).
+  Design an initial representation for boxed objects.
+
+\item \textbf{Michaelmas weeks 7--8:}
+  Add support for tuples, variants, records. Test against very simple programs.
+
+\item \textbf{Michaelmas vacation weeks 1--2:}
+  Add support for polymorphic functions and types.
+
+\item \textbf{Michaelmas vacation weeks 3--4:}
+  Get a small, commonly-used subset of the standard library working.
+  Start creating corpus of test programs, and begin testing.
+
+\item \textbf{Michaelmas vacation weeks 5--6:}
+  Reserved for holidays/revision.
+
+\item \textbf{Lent term weeks 0--1:}
+  Add initial support for dynamic closure creation.
+  Complete corpus of test OCaml programs; begin evaluation.
+  Start progress report.
+
+\item \textbf{Lent term week 2--3:}
+  Milestone: compiler has working support for most test programs (demoable).
+  Submit progress report.
+  Prepare and give presentation.
+
+\item \textbf{Lent term weeks 4--6:}
+  Testing; fix bugs. Improve closure creation, and evaluate.
+  Investigate ``source maps'' to map C code to corresponding lines in the OCaml source.
+
+\item \textbf{Lent term weeks 7--8:}
+  Further evaluation, and work on improving evaluated metrics.
+  Start on main chapters of dissertation.
+
+\item \textbf{Easter vacation weeks 1--3:}
+  Milestone: compiler works for all intended features.
+  Wrap up evaluation. Continued work on dissertation.
+
+\item \textbf{Easter vacation weeks 4--5:}
+  Reserved for holidays/revision. Extension work if time permits.
+
+\item \textbf{Easter term weeks 0--2:}
+  Form conclusion and complete dissertation. Time may be limited due to revision.
+
+\item \textbf{Easter term week 3:}
+  Proof reading and submission of final dissertation.
+
+
+
+\end{enumerate}
+
+\begin{thebibliography}{9}
+
+\bibitem{tarditi90}
+  D. Tarditi, A. Acharya, P. Lee,
+  \emph{No Assembly Required: Compiling Standard ML to C},
+  November 1990. \\ \url{http://repository.cmu.edu/cgi/viewcontent.cgi?article=3011&context=compsci}
+
+\bibitem{breuel88}
+  Thomas Breuel,
+  \emph{Lexical Closures for C++},
+  In Proc. USENIX C++ Conf., pages 293-304,
+  Denver, CO, October 1988.  \\ \url{http://www.cl.cam.ac.uk/~srk31/teaching/redist/breuel88lexical.pdf}
+
+\end{thebibliography}
+
+\end{document}
