@@ -208,15 +208,17 @@ module C = struct
     ) else if st = C_Boxed then (
       (* we need to unbox according to target_ctype *)
       let box_field, box_canon_type = box_kind tt in
-      cast tt (box_canon_type, C_Field (source_cexpr, box_field))
+      cast tt (box_canon_type,
+        C_FunCall (C_GlobalVariable (Printf.sprintf "GET_%s" (String.uppercase_ascii box_field)),
+          [source_cexpr])
+      )
     ) else if tt = C_Boxed then (
       (* we need to box according to source_ctype *)
       let box_field, box_canon_type = box_kind st in
       C_Cast (tt,
-        (* TODO: rewrite -- this is disgusting *)
-        C_Blob ( Printf.sprintf "{ .%s = " box_field
-               , cast box_canon_type (source_ctype, source_cexpr)
-               , " }"))
+        C_FunCall (C_GlobalVariable (Printf.sprintf "NEW_%s" (String.uppercase_ascii box_field)),
+          [cast box_canon_type (source_ctype, source_cexpr)])
+      )
     ) else failwith "unreachable"
 
   (* for extracting C_InlineRevStatements. assigns the final expression to the
