@@ -339,3 +339,5 @@
 /dissertation/*.synctex.gz
 /dissertation/*.toc
 /dissertation/*.vrb
+
+/stdlib_liballocs/*.c
