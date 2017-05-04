@@ -194,10 +194,6 @@ DEFINE_BUILTIN_EXCEPTION(Undefined_recursive_module)
 #undef DEFINE_BUILTIN_EXCEPTION
 
 
-void ocaml_liballocs_show(ocaml_value_t obj) {
-    fprintf(stderr, "%d\n", obj.i);
-}
-
 /*****************************************************************************
   main
 *****************************************************************************/
