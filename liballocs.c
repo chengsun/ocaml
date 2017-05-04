@@ -18,14 +18,14 @@
 static int64_t oo_last_id = 0;
 
 ocaml_value_t caml_set_oo_id (ocaml_value_t obj) {
-  obj.p[1].i = oo_last_id;
+  SET_I(GET_P(obj)[1], oo_last_id);
   oo_last_id++;
   return obj;
 }
 
 // used by [exception]
 ocaml_value_t caml_fresh_oo_id (ocaml_value_t v) {
-  return (ocaml_value_t){.i = oo_last_id++};
+  return NEW_I(oo_last_id++);
 }
 
 /*****************************************************************************
@@ -46,7 +46,7 @@ ocaml_value_t *Printf;
 
 void Printf__init() {
     Printf = malloc(2 * sizeof(ocaml_value_t));
-    Printf[1].fp = (generic_funcp_t) &ocaml_printf;
+    SET_FP(Printf[1], (generic_funcp_t) &ocaml_printf);
 }
 
 void Test__init();
@@ -171,8 +171,8 @@ generic_funcp_t ocaml_liballocs_close(generic_funcp_t fun, int64_t n_args, ocaml
 #define QUOTE(x) _QUOTE(x)
 #define DEFINE_BUILTIN_EXCEPTION(name) \
     ocaml_value_t __##name[2] = { \
-        (ocaml_value_t){ .p = (ocaml_value_t *) QUOTE(name) }, \
-        (ocaml_value_t){ .i = 0 } \
+        NEW_P((generic_datap_t) QUOTE(name)), \
+        NEW_I(0) \
     }; \
     ocaml_value_t *name = __##name;
 
@@ -207,7 +207,7 @@ int main() {
     } else { // catch
         OCAML_LIBALLOCS_EXN_POP();
         fprintf(stderr, "Uncaught OCaml exception: %s\n",
-                (const char *)ocaml_liballocs_get_exn().p[0].p);
+                (const char *) GET_P(GET_P(ocaml_liballocs_get_exn())[0]));
         return 1;
     }
 }

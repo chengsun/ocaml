@@ -29,6 +29,21 @@ STATIC_ASSERT(sizeof(generic_datap_t) == 8, sizeof_datap);
 STATIC_ASSERT(sizeof(generic_funcp_t) == 8, sizeof_funcp);
 STATIC_ASSERT(sizeof(ocaml_value_t) == 8, sizeof_ocaml_value);
 
+#define GET_I(v) ((v).i)
+#define GET_D(v) ((v).d)
+#define GET_P(v) ((v).p)
+#define GET_FP(v) ((v).fp)
+
+#define SET_I(v,x) do { (v).i = (x); } while (0)
+#define SET_D(v,x) do { (v).d = (x); } while (0)
+#define SET_P(v,x) do { (v).p = (x); } while (0)
+#define SET_FP(v,x) do { (v).fp = (x); } while (0)
+
+#define NEW_I(v) ((ocaml_value_t){.i = (v)})
+#define NEW_D(v) ((ocaml_value_t){.d = (v)})
+#define NEW_P(v) ((ocaml_value_t){.p = (v)})
+#define NEW_FP(v) ((ocaml_value_t){.fp = (v)})
+
 
 // exception handling
 
@@ -116,7 +131,7 @@ external register_named_value : string -> 'a -> unit
 static ocaml_value_t caml_register_named_value(ocaml_value_t v1, ocaml_value_t v2) {
     // TODO: doesn't need to do anything right now
     // assert(false && "caml_register_named_value unimplemented");
-    return (ocaml_value_t){.i = 0};
+    return NEW_I(0);
 }
 
 /*
@@ -166,93 +181,93 @@ external ldexp : (float [@unboxed]) -> (int [@untagged]) -> (float [@unboxed]) =
 external modf : float -> float * float = "caml_modf_float"
 */
 static ocaml_value_t caml_power_float(ocaml_value_t v1, ocaml_value_t v2) {
-    return (ocaml_value_t){.d = pow(v1.d, v2.d)};
+    return NEW_D(pow(GET_D(v1), GET_D(v2)));
 }
 static ocaml_value_t caml_exp_float(ocaml_value_t v1) {
-    return (ocaml_value_t){.d = exp(v1.d)};
+    return NEW_D(exp(GET_D(v1)));
 }
 static ocaml_value_t caml_expm1_float(ocaml_value_t v1) {
     assert (false && "unimplemented");
-    return (ocaml_value_t){.d = 0.0};
+    return NEW_D(0.0);
 }
 static ocaml_value_t caml_acos_float(ocaml_value_t v1) {
-    return (ocaml_value_t){.d = acos(v1.d)};
+    return NEW_D(acos(GET_D(v1)));
 }
 static ocaml_value_t caml_asin_float(ocaml_value_t v1) {
-    return (ocaml_value_t){.d = asin(v1.d)};
+    return NEW_D(asin(GET_D(v1)));
 }
 static ocaml_value_t caml_atan_float(ocaml_value_t v1) {
-    return (ocaml_value_t){.d = atan(v1.d)};
+    return NEW_D(atan(GET_D(v1)));
 }
 static ocaml_value_t caml_atan2_float(ocaml_value_t v1, ocaml_value_t v2) {
-    return (ocaml_value_t){.d = atan2(v1.d, v2.d)};
+    return NEW_D(atan2(GET_D(v1), GET_D(v2)));
 }
 static ocaml_value_t caml_hypot_float(ocaml_value_t v1, ocaml_value_t v2) {
     assert (false && "unimplemented");
-    return (ocaml_value_t){.d = 0.0};
+    return NEW_D(0.0);
 }
 static ocaml_value_t caml_cos_float(ocaml_value_t v1) {
-    return (ocaml_value_t){.d = cos(v1.d)};
+    return NEW_D(cos(GET_D(v1)));
 }
 static ocaml_value_t caml_cosh_float(ocaml_value_t v1) {
-    return (ocaml_value_t){.d = cosh(v1.d)};
+    return NEW_D(cosh(GET_D(v1)));
 }
 static ocaml_value_t caml_log_float(ocaml_value_t v1) {
-    return (ocaml_value_t){.d = log(v1.d)};
+    return NEW_D(log(GET_D(v1)));
 }
 static ocaml_value_t caml_log10_float(ocaml_value_t v1) {
-    return (ocaml_value_t){.d = log10(v1.d)};
+    return NEW_D(log10(GET_D(v1)));
 }
 static ocaml_value_t caml_log1p_float(ocaml_value_t v1) {
     assert (false && "unimplemented");
-    return (ocaml_value_t){.d = 0.0};
+    return NEW_D(0.0);
 }
 static ocaml_value_t caml_sin_float(ocaml_value_t v1) {
-    return (ocaml_value_t){.d = sin(v1.d)};
+    return NEW_D(sin(GET_D(v1)));
 }
 static ocaml_value_t caml_sinh_float(ocaml_value_t v1) {
-    return (ocaml_value_t){.d = sinh(v1.d)};
+    return NEW_D(sinh(GET_D(v1)));
 }
 static ocaml_value_t caml_sqrt_float(ocaml_value_t v1) {
-    return (ocaml_value_t){.d = sqrt(v1.d)};
+    return NEW_D(sqrt(GET_D(v1)));
 }
 static ocaml_value_t caml_tan_float(ocaml_value_t v1) {
-    return (ocaml_value_t){.d = tan(v1.d)};
+    return NEW_D(tan(GET_D(v1)));
 }
 static ocaml_value_t caml_tanh_float(ocaml_value_t v1) {
-    return (ocaml_value_t){.d = tanh(v1.d)};
+    return NEW_D(tanh(GET_D(v1)));
 }
 static ocaml_value_t caml_ceil_float(ocaml_value_t v1) {
-    return (ocaml_value_t){.d = ceil(v1.d)};
+    return NEW_D(ceil(GET_D(v1)));
 }
 static ocaml_value_t caml_floor_float(ocaml_value_t v1) {
-    return (ocaml_value_t){.d = floor(v1.d)};
+    return NEW_D(floor(GET_D(v1)));
 }
 static ocaml_value_t caml_copysign_float(ocaml_value_t v1, ocaml_value_t v2) {
     assert (false && "unimplemented");
-    return (ocaml_value_t){.d = 0.0};
+    return NEW_D(0.0);
 }
 static ocaml_value_t caml_fmod_float(ocaml_value_t v1, ocaml_value_t v2) {
-    return (ocaml_value_t){.d = fmod(v1.d, v2.d)};
+    return NEW_D(fmod(GET_D(v1), GET_D(v2)));
 }
 static ocaml_value_t caml_frexp_float(ocaml_value_t v1) {
     assert (false && "unimplemented");
-    return (ocaml_value_t){.d = 0.0};
+    return NEW_D(0.0);
 }
 static ocaml_value_t caml_ldexp_float(ocaml_value_t v1, ocaml_value_t v2) {
     assert (false && "unimplemented");
-    return (ocaml_value_t){.d = 0.0};
+    return NEW_D(0.0);
 }
 static ocaml_value_t caml_modf_float(ocaml_value_t v1) {
     assert (false && "unimplemented");
-    return (ocaml_value_t){.d = 0.0};
+    return NEW_D(0.0);
 }
 
 /*
 external float_of_bits : int64 -> float = "caml_int64_float_of_bits"
 */
 static ocaml_value_t caml_int64_float_of_bits(ocaml_value_t v) {
-    return (ocaml_value_t){.d = (double)v.i};
+    return NEW_D((double) GET_I(v));
 }
 
 /*
@@ -273,10 +288,10 @@ static ocaml_value_t caml_blit_string(ocaml_value_t v1, ocaml_value_t v2, ocaml_
 static ocaml_value_t caml_format_int(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_format_int unimplemented"); }
 static ocaml_value_t caml_format_float(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_format_float unimplemented"); }
 static ocaml_value_t caml_int_of_string(ocaml_value_t v) {
-    return (ocaml_value_t){.i = atol((const char *) v.p)};
+    return NEW_I(atol((const char *) GET_P(v)));
 }
 static ocaml_value_t caml_float_of_string(ocaml_value_t v) {
-    return (ocaml_value_t){.d = (double)atof((const char *) v.p)};
+    return NEW_D((double)atof((const char *) GET_P(v)));
 }
 
 
@@ -289,12 +304,12 @@ external open_desc : string -> open_flag list -> int -> int = "caml_sys_open"
 static ocaml_value_t caml_ml_open_descriptor_out(ocaml_value_t v) {
     // TODO: doesn't need to do anything right now
     // assert(false && "caml_ml_open_descriptor_out unimplemented");
-    return (ocaml_value_t){.i = 0};
+    return NEW_I(0);
 }
 static ocaml_value_t caml_ml_open_descriptor_in (ocaml_value_t v) {
     // TODO: doesn't need to do anything right now
     // assert(false && "caml_ml_open_descriptor_in unimplemented");
-    return (ocaml_value_t){.i = 0};
+    return NEW_I(0);
 }
 static ocaml_value_t caml_sys_open(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3) { assert(false && "caml_ml_open_desc unimplemented"); }
 
@@ -376,7 +391,7 @@ static ocaml_value_t caml_ml_pos_out_64(ocaml_value_t v) { assert(false && "caml
 static ocaml_value_t caml_ml_channel_size_64(ocaml_value_t v) { assert(false && "caml_ml_channel_size_64 unimplemented"); }
 
 static ocaml_value_t caml_sys_exit(ocaml_value_t v) {
-    exit(v.i);
+    exit(GET_I(v));
 }
 
 #endif
