@@ -4,7 +4,9 @@
 #include <assert.h>
 #include <math.h>
 #include <stdlib.h>    // for malloc
+#include <stdio.h>
 #include <stdint.h>
+#include <inttypes.h>  // for PRIiPTR
 #include <stdbool.h>
 #include <setjmp.h>    // for setjmp
 #include <string.h>    // for strcmp
@@ -285,8 +287,23 @@ external float_of_string : string -> float = "caml_float_of_string"
 */
 static ocaml_value_t caml_create_string(ocaml_value_t v) { assert(false && "caml_create_string unimplemented"); }
 static ocaml_value_t caml_blit_string(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3, ocaml_value_t v4, ocaml_value_t v5) { assert(false && "caml_blit_string unimplemented"); }
-static ocaml_value_t caml_format_int(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_format_int unimplemented"); }
-static ocaml_value_t caml_format_float(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_format_float unimplemented"); }
+static ocaml_value_t caml_format_int(ocaml_value_t v1, ocaml_value_t v2) {
+    if (0 == strcmp((const char *) GET_P(v1), "%d")) {
+        int size = snprintf(NULL, 0, "%"PRIiPTR, GET_I(v2)) + 1;
+        char *str = malloc(size);
+        snprintf(str, size, "%"PRIiPTR, GET_I(v2));
+        return NEW_P((generic_datap_t) str);
+    } else {
+        assert(false && "caml_format_int unimplemented");
+    }
+}
+static ocaml_value_t caml_format_float(ocaml_value_t v1, ocaml_value_t v2) {
+    const char *fs = (const char *) GET_P(v1);
+    int size = snprintf(NULL, 0, fs, GET_D(v2)) + 1;
+    char *str = malloc(size);
+    snprintf(str, size, fs, GET_D(v2));
+    return NEW_P((generic_datap_t) str);
+}
 static ocaml_value_t caml_int_of_string(ocaml_value_t v) {
     return NEW_I(atol((const char *) GET_P(v)));
 }
@@ -304,12 +321,12 @@ external open_desc : string -> open_flag list -> int -> int = "caml_sys_open"
 static ocaml_value_t caml_ml_open_descriptor_out(ocaml_value_t v) {
     // TODO: doesn't need to do anything right now
     // assert(false && "caml_ml_open_descriptor_out unimplemented");
-    return NEW_I(0);
+    return v;
 }
 static ocaml_value_t caml_ml_open_descriptor_in (ocaml_value_t v) {
     // TODO: doesn't need to do anything right now
     // assert(false && "caml_ml_open_descriptor_in unimplemented");
-    return NEW_I(0);
+    return v;
 }
 static ocaml_value_t caml_sys_open(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3) { assert(false && "caml_ml_open_desc unimplemented"); }
 
@@ -360,13 +377,76 @@ external pos_in : in_channel -> int64 = "caml_ml_pos_in_64"
 external in_channel_length : in_channel -> int64 = "caml_ml_channel_size_64"
 external sys_exit : int -> 'a = "caml_sys_exit"
 */
-static ocaml_value_t caml_ml_set_channel_name(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_set_channel_name unimplemented"); }
-static ocaml_value_t caml_ml_flush(ocaml_value_t v) { assert(false && "caml_ml_flush unimplemented"); }
-static ocaml_value_t caml_ml_out_channels_list(ocaml_value_t v) { assert(false && "caml_ml_out_channels_list unimplemented"); }
+static ocaml_value_t caml_stdout_output(ocaml_value_t v, ocaml_value_t s) {
+    fprintf(stdout, "%s", (const char *) GET_P(s));
+    return NEW_P(NULL);
+}
+static ocaml_value_t caml_stderr_output(ocaml_value_t v, ocaml_value_t s) {
+    fprintf(stderr, "%s", (const char *) GET_P(s));
+    return NEW_P(NULL);
+}
 
-static ocaml_value_t caml_ml_output(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3, ocaml_value_t v4) { assert(false && "caml_ml_output unimplemented"); }
-static ocaml_value_t caml_ml_output_char(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_output_char unimplemented"); }
-static ocaml_value_t caml_ml_output_int(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_output_int unimplemented"); }
+/*
+static struct {
+    ocaml_value_t buffer;
+    ocaml_value_t output;
+} caml_stdout = { NEW_P((generic_datap_t) ""), NEW_FP((generic_funcp_t) caml_stdout_output) }
+, caml_stderr = { NEW_P((generic_datap_t) ""), NEW_FP((generic_funcp_t) caml_stderr_output) };
+*/
+static ocaml_value_t caml_ml_set_channel_name(ocaml_value_t v1, ocaml_value_t v2) { assert(false && "caml_ml_set_channel_name unimplemented"); }
+static ocaml_value_t caml_ml_flush(ocaml_value_t oc) {
+    if (GET_I(oc) == 1) {
+        fflush(stdout);
+    } else if (GET_I(oc) == 2) {
+        fflush(stderr);
+    } else {
+        assert(false && "caml_ml_flush for other ocs unimplemented");
+    }
+    return NEW_P(NULL);
+}
+static ocaml_value_t caml_ml_out_channels_list(ocaml_value_t v) { assert(false && "caml_ml_out_channels_list unimplemented"); }
+/*
+static ocaml_value_t caml_ml_out_channels_list(ocaml_value_t v) {
+    ocaml_value_t *n2 = (ocaml_value_t *) malloc(2 * sizeof(ocaml_value_t));
+    SET_P(n2[0], (generic_datap_t) &caml_stderr);
+    SET_P(n2[1], NULL);
+    ocaml_value_t *n1 = (ocaml_value_t *) malloc(2 * sizeof(ocaml_value_t));
+    SET_P(n1[0], (generic_datap_t) &caml_stdout);
+    SET_P(n1[1], n2);
+    return NEW_P(n1);
+}
+*/
+
+static ocaml_value_t caml_ml_output(ocaml_value_t oc, ocaml_value_t s, ocaml_value_t offset, ocaml_value_t len) {
+    if (GET_I(oc) == 1) {
+        fwrite(((const char *)GET_P(s)) + GET_I(offset), 1, GET_I(len), stdout);
+    } else if (GET_I(oc) == 2) {
+        fwrite(((const char *)GET_P(s)) + GET_I(offset), 1, GET_I(len), stderr);
+    } else {
+        assert(false && "caml_ml_output for other ocs unimplemented");
+    }
+    return NEW_P(NULL);
+}
+static ocaml_value_t caml_ml_output_char(ocaml_value_t oc, ocaml_value_t v2) {
+    if (GET_I(oc) == 1) {
+        fputc(GET_I(v2), stdout);
+    } else if (GET_I(oc) == 2) {
+        fputc(GET_I(v2), stderr);
+    } else {
+        assert(false && "caml_ml_output_char for other ocs unimplemented");
+    }
+    return NEW_P(NULL);
+}
+static ocaml_value_t caml_ml_output_int(ocaml_value_t oc, ocaml_value_t v2) {
+    if (GET_I(oc) == 1) {
+        fprintf(stdout, "%"PRIiPTR, GET_I(v2));
+    } else if (GET_I(oc) == 2) {
+        fprintf(stderr, "%"PRIiPTR, GET_I(v2));
+    } else {
+        assert(false && "caml_ml_output_int for other ocs unimplemented");
+    }
+    return NEW_P(NULL);
+}
 static ocaml_value_t caml_output_value(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3) { assert(false && "caml_ml_output_value unimplemented"); }
 
 static ocaml_value_t caml_ml_input(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3, ocaml_value_t v4) { assert(false && "caml_ml_input unimplemented"); }
