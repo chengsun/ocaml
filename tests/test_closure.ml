@@ -34,18 +34,18 @@ let make_counter_v4 () =
 let tester make_counter = (
   let a = make_counter () in
   let b = make_counter () in
-  Printf.printf "%d\n" (a 1);
-  Printf.printf "%d\n" (b (-1));
-  Printf.printf "%d\n" (a 1);
-  Printf.printf "%d\n" (b (-1))
+  print_int (a 1); print_newline ();
+  print_int (b (-1)); print_newline ();
+  print_int (a 1); print_newline ();
+  print_int (b (-1)); print_newline ()
 )
 
 let () = (
   tester make_counter_v1;
-  Printf.printf "---\n";
+  print_string "---\n";
   tester make_counter_v2;
-  Printf.printf "---\n";
+  print_string "---\n";
   tester make_counter_v3;
-  Printf.printf "---\n";
+  print_string "---\n";
   tester make_counter_v4;
 )

@@ -2,4 +2,4 @@ exception Ouch
 
 let () = raise Ouch
 
-let () = Printf.printf "goodbye\n"
+let () = print_string "goodbye\n"

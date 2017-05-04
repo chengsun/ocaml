@@ -1,8 +1,8 @@
 let rec parity = function
-  | 0 -> Printf.printf "even!\n"
+  | 0 -> print_string "even!\n"
   | n -> parity_odd (pred n)
 and parity_odd = function
-  | 0 -> Printf.printf "odd!\n"
+  | 0 -> print_string "odd!\n"
   | n -> parity (pred n)
 
 let () = (

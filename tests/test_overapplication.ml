@@ -3,4 +3,5 @@ let f x =
   g ()
 
 let _ =
-  Printf.printf "%d\n" (f 1 2)
+  print_int (f 1 2);
+  print_newline ()

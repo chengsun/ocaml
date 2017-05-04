@@ -4,4 +4,4 @@ let b () = a
 
 let a = 4
 
-let _ = Printf.printf "%d\n" (b ())
+let _ = print_int (b ()); print_newline ()
