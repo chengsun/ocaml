@@ -45,5 +45,5 @@ let sieve max =
 let () =
   let primes = sieve 50_000 in
   let prime_sum = List.fold_right (fun x y -> x + y) primes 0 in
-  Printf.printf "%d\n" prime_sum;
+  print_int prime_sum; print_newline ();
   assert (prime_sum = 121013308)

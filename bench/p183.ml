@@ -24,4 +24,4 @@ let () =
     for n = 5 to 10000 do
         ans := !ans + d n
     done;
-    Printf.printf "%d\n" !ans
+    print_int !ans; print_newline ()

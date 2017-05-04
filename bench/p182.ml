@@ -9,4 +9,4 @@ let solve p q =
     done;
     !ans
 
-let () = Printf.printf "%d\n" (solve 1009 3643)
+let () = print_int (solve 1009 3643); print_newline ()
