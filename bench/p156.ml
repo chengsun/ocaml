@@ -45,4 +45,4 @@ let () =
         let (_, result) = count d 0 0 0 11 in
         final_result := !final_result + result
     done;
-    Printf.printf "%d\n" !final_result
+    print_int !final_result; print_newline ()

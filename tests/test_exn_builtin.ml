@@ -6,8 +6,8 @@ let g x =
 
 let tryit fn x =
   try fn x; () with
-  | Not_found -> Printf.printf "Not_found\n"
-  | Invalid_argument y -> Printf.printf "Invalid_argument %s\n" y
+  | Not_found -> print_string "Not_found\n"
+  | Invalid_argument y -> print_string "Invalid_argument "; print_string y; print_newline ()
 
 let _ =
   tryit f "test";

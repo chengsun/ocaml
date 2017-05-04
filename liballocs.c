@@ -28,28 +28,6 @@ ocaml_value_t caml_fresh_oo_id (ocaml_value_t v) {
   return NEW_I(oo_last_id++);
 }
 
-/*****************************************************************************
-  Printf
-*****************************************************************************/
-
-void *ocaml_printf(void *a[], ...) {
-    va_list args;
-
-    va_start(args, a);
-    vprintf(a[1], args);
-    va_end(args);
-
-    return NULL;
-}
-
-ocaml_value_t *Printf;
-
-void Printf__init() {
-    Printf = malloc(2 * sizeof(ocaml_value_t));
-    SET_FP(Printf[1], (generic_funcp_t) &ocaml_printf);
-}
-
-void Test__init();
 
 
 /*****************************************************************************
@@ -197,6 +175,9 @@ DEFINE_BUILTIN_EXCEPTION(Undefined_recursive_module)
 /*****************************************************************************
   main
 *****************************************************************************/
+
+void Test__init();
+
 
 int main() {
     // set up root exception handler

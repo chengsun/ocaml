@@ -43,7 +43,10 @@ let flat_map_fold_base n =
 let test f f' n =
   let x = f n in
   let x' = f' n in
-  Printf.printf "%d should be equal to %d\n" x x'
+  print_int x;
+  print_string " should be equal to ";
+  print_int x';
+  print_newline ()
 
 let _ =
   let n = 10_000 in

@@ -1,7 +1,6 @@
 let () =
-  Printf.printf "%d\n" ((+8) lsr 2);
-  (* TODO: printf %d emulation broken *)
-  (* Printf.printf "%d\n" ((-8) lsr 2); *)
-  Printf.printf "%d\n" ((-8) lsr 62);
-  Printf.printf "%d\n" ((+8) asr 2);
-  Printf.printf "%d\n" ((-8) asr 2);
+  print_int ((+8) lsr 2); print_newline ();
+  print_int ((-8) lsr 2); print_newline ();
+  print_int ((-8) lsr 62); print_newline ();
+  print_int ((+8) asr 2); print_newline ();
+  print_int ((-8) asr 2); print_newline ();

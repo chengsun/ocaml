@@ -5,7 +5,7 @@ let add10 = fma 5 2
 let add6 = three_ma 2
 
 let () = (
-  Printf.printf "%d\n" (three_ma 100 33);
-  Printf.printf "%d\n" (add10 1);
-  Printf.printf "%d\n" (add6 60);
+  print_int (three_ma 100 33); print_newline ();
+  print_int (add10 1); print_newline ();
+  print_int (add6 60); print_newline ()
 )

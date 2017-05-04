@@ -1,5 +1,5 @@
 let f x = match x with | "a" -> 1 | "b" -> 2 | _ -> 3
 
-let () = Printf.printf "%d\n" (f "a")
-let () = Printf.printf "%d\n" (f "b")
-let () = Printf.printf "%d\n" (f "c")
+let () = print_int (f "a"); print_newline ()
+let () = print_int (f "b"); print_newline ()
+let () = print_int (f "c"); print_newline ()

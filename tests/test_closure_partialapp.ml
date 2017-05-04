@@ -9,4 +9,4 @@ let _ =
   Printf.printf "%d\n" (f (fun x -> x * 2) 3)
   *)
   let h = f (fun x -> x * 2) in
-  Printf.printf "%d\n" (h 3)
+  print_int (h 3); print_newline ()

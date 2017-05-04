@@ -44,4 +44,8 @@ let gaussdivs =
     )
 ;;
 
-let () = Printf.printf "%d + %d = %d\n" realdivs gaussdivs (realdivs + gaussdivs)
+let () =
+  print_int realdivs;
+  print_string " + ";
+  print_int gaussdivs;
+  print_newline ()
