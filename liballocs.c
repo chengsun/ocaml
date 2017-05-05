@@ -172,6 +172,20 @@ DEFINE_BUILTIN_EXCEPTION(Undefined_recursive_module)
 #undef DEFINE_BUILTIN_EXCEPTION
 
 
+
+void ocaml_show(ocaml_value_t v) {
+    if (IS_P(v)) {
+        fprintf(stderr, "%x\n", GET_P(v));
+    } else if (IS_I(v)) {
+        fprintf(stderr, "%d\n", GET_I(v));
+    } else if (IS_D(v)) {
+        fprintf(stderr, "%f\n", GET_D(v));
+    } else {
+        assert(false);
+    }
+}
+
+
 /*****************************************************************************
   main
 *****************************************************************************/

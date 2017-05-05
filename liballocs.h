@@ -20,7 +20,6 @@ typedef union _ocaml_value_t (*generic_funcp_t)();
 
 typedef union _ocaml_value_t {
     intptr_t        i;
-    double          d;
     generic_datap_t p;
     generic_funcp_t fp;
 } ocaml_value_t;
@@ -31,15 +30,45 @@ STATIC_ASSERT(sizeof(generic_datap_t) == 8, sizeof_datap);
 STATIC_ASSERT(sizeof(generic_funcp_t) == 8, sizeof_funcp);
 STATIC_ASSERT(sizeof(ocaml_value_t) == 8, sizeof_ocaml_value);
 
-#define GET_I(v) ((v).i)
-#define GET_D(v) ((v).d)
+static intptr_t __sext50(intptr_t x) {
+    struct {
+        intptr_t x : 50;
+    } s = {x};
+    return s.x;
+}
+
+static intptr_t __double_encode(double x) {
+    union {
+        double d;
+        intptr_t i;
+    } s = {.d = x};
+    // TODO: canonicalise NaN
+    return s.i + (7LL<<48);
+}
+
+static double __double_decode(intptr_t x) {
+    union {
+        double d;
+        intptr_t i;
+    } s = {.i = x - (7LL<<48)};
+    return s.d;
+}
+
+#define __I_MASK ((1LL<<50)-1)
+
+#define GET_I(v) (__sext50((v).i & __I_MASK))
+#define GET_D(v) (__double_decode((v).i))
 #define GET_P(v) ((v).p)
 #define GET_FP(v) ((v).fp)
 
-#define NEW_I(v) ((ocaml_value_t){.i = (v)})
-#define NEW_D(v) ((ocaml_value_t){.d = (v)})
+#define NEW_I(v) ((ocaml_value_t){.i = ((v) & __I_MASK) | 0xfffc000000000000ULL})
+#define NEW_D(v) ((ocaml_value_t){.i = __double_encode(v)})
 #define NEW_P(v) ((ocaml_value_t){.p = (v)})
 #define NEW_FP(v) ((ocaml_value_t){.fp = (v)})
+
+#define IS_I(v) ((uintptr_t) (v).i >= 0xfffc000000000000ULL)
+#define IS_P(v) ((uintptr_t) (v).i < 0x0001000000000000ULL)
+#define IS_D(v) (!IS_I(v) && !IS_P(v))
 
 
 // exception handling
