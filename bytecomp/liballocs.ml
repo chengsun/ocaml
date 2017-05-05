@@ -412,7 +412,7 @@ module Emitcode = struct
 
 
   let to_file oc _modulename _filename c_code =
-    output_string oc "#include \"liballocs.h\"\n\n";
+    output_string oc "#include \"liballocs_runtime.h\"\n\n";
     List.iter (fun t ->
         output_string oc (toplevel_to_string t);
         output_string oc "\n\n";

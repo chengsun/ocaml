@@ -8,8 +8,8 @@ echo ">>> Benchmarking ${name}..."
 cp ./bench/${name}.ml /tmp/test.ml
 OCAMLRUNPARAM=b ./ocamlc -target-liballocs -o /tmp/test.ocaml.exe -g /tmp/test.ml
 ./ocamlc -o /tmp/test.ocamlnative.exe -g /tmp/test.ml
-gcc -ggdb -O2 -march=native -std=c99 -Wall -Wno-unused -I. -o /tmp/test.gcc.exe /tmp/test.c ./stdlib_liballocs/*.c ./liballocs.c -lm
-clang -ggdb -O2 -march=native -std=c99 -Wall -Wno-unused -I. -o /tmp/test.clang.exe /tmp/test.c ./stdlib_liballocs/*.c ./liballocs.c -lm
+gcc -ggdb -O2 -march=native -std=c99 -Wall -Wno-unused -I. -o /tmp/test.gcc.exe /tmp/test.c ./stdlib_liballocs/*.c ./liballocs_runtime.c -lm
+clang -ggdb -O2 -march=native -std=c99 -Wall -Wno-unused -I. -o /tmp/test.clang.exe /tmp/test.c ./stdlib_liballocs/*.c ./liballocs_runtime.c -lm
 
 echo "TESTING GCC:"
 time /tmp/test.gcc.exe || true

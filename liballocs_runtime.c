@@ -9,7 +9,7 @@
 #include <string.h>    // for memcpy
 #include <sys/mman.h>  // for mmap
 
-#include "liballocs.h"
+#include "liballocs_runtime.h"
 
 /*****************************************************************************
   caml internal functions
