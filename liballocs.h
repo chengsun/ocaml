@@ -61,7 +61,7 @@ static double __double_decode(intptr_t x) {
 #define GET_P(v) ((v).p)
 #define GET_FP(v) ((v).fp)
 
-#define NEW_I(v) ((ocaml_value_t){.i = (v) & __I_MASK})
+#define NEW_I(v) ((ocaml_value_t){.i = ((v) & __I_MASK) | 0xfffc000000000000LL})
 #define NEW_D(v) ((ocaml_value_t){.i = __double_encode(v)})
 #define NEW_P(v) ((ocaml_value_t){.p = (v)})
 #define NEW_FP(v) ((ocaml_value_t){.fp = (v)})
