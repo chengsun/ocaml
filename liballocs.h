@@ -31,12 +31,21 @@ STATIC_ASSERT(sizeof(generic_datap_t) == 8, sizeof_datap);
 STATIC_ASSERT(sizeof(generic_funcp_t) == 8, sizeof_funcp);
 STATIC_ASSERT(sizeof(ocaml_value_t) == 8, sizeof_ocaml_value);
 
-#define GET_I(v) ((v).i)
+static intptr_t __sext50(intptr_t x) {
+    struct {
+        intptr_t x : 50;
+    } s = {x};
+    return s.x;
+}
+
+#define __I_MASK ((((intptr_t)1)<<50)-1)
+
+#define GET_I(v) (__sext50((v).i & __I_MASK))
 #define GET_D(v) ((v).d)
 #define GET_P(v) ((v).p)
 #define GET_FP(v) ((v).fp)
 
-#define NEW_I(v) ((ocaml_value_t){.i = (v)})
+#define NEW_I(v) ((ocaml_value_t){.i = (v) & __I_MASK})
 #define NEW_D(v) ((ocaml_value_t){.d = (v)})
 #define NEW_P(v) ((ocaml_value_t){.p = (v)})
 #define NEW_FP(v) ((ocaml_value_t){.fp = (v)})

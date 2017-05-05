@@ -192,34 +192,40 @@ module C = struct
     let tt = canon_ctype target_ctype in
     let st = if st = C_WhateverType then tt else st in
     let tt = if tt = C_WhateverType then st else tt in
-    if st = tt then (
-      source_cexpr
-    ) else if st <> C_Boxed && tt <> C_Boxed then (
-      (* we need to cast *)
-      (* make sure the cast is sensible *)
-      let skind = fst (box_kind st) in
-      let tkind = fst (box_kind tt) in
-      if (not (skind = tkind) &&
-          not (skind = "p" && tkind = "i") (* e.g. pointer to bool *)
-         ) then begin
-        failwith (Printf.sprintf "bad cast from %s to %s: differing box kinds" (ctype_to_string source_ctype) (ctype_to_string target_ctype))
-      end;
-      C_Cast (tt, source_cexpr)
-    ) else if st = C_Boxed then (
-      (* we need to unbox according to target_ctype *)
-      let box_field, box_canon_type = box_kind tt in
-      cast tt (box_canon_type,
-        C_FunCall (C_GlobalVariable (Printf.sprintf "GET_%s" (String.uppercase_ascii box_field)),
-          [source_cexpr])
-      )
-    ) else if tt = C_Boxed then (
-      (* we need to box according to source_ctype *)
-      let box_field, box_canon_type = box_kind st in
-      C_Cast (tt,
-        C_FunCall (C_GlobalVariable (Printf.sprintf "NEW_%s" (String.uppercase_ascii box_field)),
-          [cast box_canon_type (source_ctype, source_cexpr)])
-      )
-    ) else failwith "unreachable"
+    let result =
+      if st = tt then (
+        source_cexpr
+      ) else if st <> C_Boxed && tt <> C_Boxed then (
+        (* we need to cast *)
+        (* make sure the cast is sensible *)
+        let skind = fst (box_kind st) in
+        let tkind = fst (box_kind tt) in
+        if (not (skind = tkind) &&
+            not (skind = "p" && tkind = "i") (* e.g. pointer to bool *)
+           ) then begin
+          failwith (Printf.sprintf "bad cast from %s to %s: differing box kinds" (ctype_to_string source_ctype) (ctype_to_string target_ctype))
+        end;
+        C_Cast (tt, source_cexpr)
+      ) else if st = C_Boxed then (
+        (* we need to unbox according to target_ctype *)
+        let box_field, box_canon_type = box_kind tt in
+        cast tt (box_canon_type,
+          C_FunCall (C_GlobalVariable (Printf.sprintf "GET_%s" (String.uppercase_ascii box_field)),
+            [source_cexpr])
+        )
+      ) else if tt = C_Boxed then (
+        (* we need to box according to source_ctype *)
+        let box_field, box_canon_type = box_kind st in
+        C_Cast (tt,
+          C_FunCall (C_GlobalVariable (Printf.sprintf "NEW_%s" (String.uppercase_ascii box_field)),
+            [cast box_canon_type (source_ctype, source_cexpr)])
+        )
+      ) else failwith "unreachable"
+  in
+  if tt = C_UInt then (
+    (* truncate sign bits *)
+    C_BinaryOp ("&", result, C_GlobalVariable "__I_MASK")
+  ) else result
 
   (* for extracting C_InlineRevStatements. assigns the final expression to the
    * variable [id] *)
@@ -924,7 +930,7 @@ and lambda_to_texpression lam : C.texpression =
       | Porint, [e1;e2] -> int_bop "|" e1 e2
       | Pxorint, [e1;e2] -> int_bop "^" e1 e2
       | Plslint, [e1;e2] -> int_bop "<<" e1 e2
-      | Plsrint, [e1;e2] -> bop C_UInt C_UInt ">>" e1 e2
+      | Plsrint, [e1;e2] -> bop C_UInt C_Int ">>" e1 e2
       | Pasrint, [e1;e2] -> int_bop ">>" e1 e2
       | Pnegint, [e] -> int_uop "-" e
       | Pintcomp(Ceq), [e1;e2] -> intcmp_bop "==" e1 e2
