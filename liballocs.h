@@ -61,10 +61,14 @@ static double __double_decode(intptr_t x) {
 #define GET_P(v) ((v).p)
 #define GET_FP(v) ((v).fp)
 
-#define NEW_I(v) ((ocaml_value_t){.i = ((v) & __I_MASK) | 0xfffc000000000000LL})
+#define NEW_I(v) ((ocaml_value_t){.i = ((v) & __I_MASK) | 0xfffc000000000000ULL})
 #define NEW_D(v) ((ocaml_value_t){.i = __double_encode(v)})
 #define NEW_P(v) ((ocaml_value_t){.p = (v)})
 #define NEW_FP(v) ((ocaml_value_t){.fp = (v)})
+
+#define IS_I(v) ((uintptr_t) (v).i >= 0xfffc000000000000ULL)
+#define IS_P(v) ((uintptr_t) (v).i < 0x0001000000000000ULL)
+#define IS_D(v) (!IS_I(v) && !IS_P(v))
 
 
 // exception handling
