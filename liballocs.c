@@ -18,7 +18,7 @@
 static int64_t oo_last_id = 0;
 
 ocaml_value_t caml_set_oo_id (ocaml_value_t obj) {
-  SET_I(GET_P(obj)[1], oo_last_id);
+  GET_P(obj)[1] = NEW_I(oo_last_id);
   oo_last_id++;
   return obj;
 }

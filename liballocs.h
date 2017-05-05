@@ -36,11 +36,6 @@ STATIC_ASSERT(sizeof(ocaml_value_t) == 8, sizeof_ocaml_value);
 #define GET_P(v) ((v).p)
 #define GET_FP(v) ((v).fp)
 
-#define SET_I(v,x) do { (v).i = (x); } while (0)
-#define SET_D(v,x) do { (v).d = (x); } while (0)
-#define SET_P(v,x) do { (v).p = (x); } while (0)
-#define SET_FP(v,x) do { (v).fp = (x); } while (0)
-
 #define NEW_I(v) ((ocaml_value_t){.i = (v)})
 #define NEW_D(v) ((ocaml_value_t){.d = (v)})
 #define NEW_P(v) ((ocaml_value_t){.p = (v)})
@@ -408,11 +403,11 @@ static ocaml_value_t caml_ml_out_channels_list(ocaml_value_t v) { assert(false &
 /*
 static ocaml_value_t caml_ml_out_channels_list(ocaml_value_t v) {
     ocaml_value_t *n2 = (ocaml_value_t *) malloc(2 * sizeof(ocaml_value_t));
-    SET_P(n2[0], (generic_datap_t) &caml_stderr);
-    SET_P(n2[1], NULL);
+    n2[0] = NEW_P((generic_datap_t) &caml_stderr));
+    n2[1] = NEW_P(NULL);
     ocaml_value_t *n1 = (ocaml_value_t *) malloc(2 * sizeof(ocaml_value_t));
-    SET_P(n1[0], (generic_datap_t) &caml_stdout);
-    SET_P(n1[1], n2);
+    n1[0] = NEW_P((generic_datap_t) &caml_stdout));
+    n1[1] = NEW_P(n2));
     return NEW_P(n1);
 }
 */
