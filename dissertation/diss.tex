@@ -151,6 +151,24 @@ extent for a comparable purpose.
 
 \chapter{Implementation}
 
+\section{Summary and structure of code}
+
+\begin{enumerate}
+  \item the driver
+  \item the compilation module
+    \begin{enumerate}
+      \item AST
+      \item translate
+      \item fixup
+      \item emitcode
+    \end{enumerate}
+  \item the runtime
+    \begin{enumerate}
+      \item OCaml standard library
+      \item C runtime library
+    \end{enumerate}
+\end{enumerate}
+
 \section{Closures}
 
 \subsection{Runtime support}
@@ -228,6 +246,12 @@ Note also the deliberate choice of \lstinline{pop rcx} to remove the \lstinline{
 \subsubsection{Self-recursive closure optimisation}
 
 \subsubsection{Mutually recursive closures}
+
+
+
+\section{NaN boxing}
+
+In order to support polymorphic comparisons, we need to use a technique to be able to distinguish pointers from immediate ints and doubles.
 
 
 \chapter{Evaluation}
