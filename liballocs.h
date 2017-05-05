@@ -43,14 +43,14 @@ static intptr_t __double_encode(double x) {
         intptr_t i;
     } s = {.d = x};
     // TODO: canonicalise NaN
-    return s.i + (7LL<<48);
+    return s.i + (1LL<<48);
 }
 
 static double __double_decode(intptr_t x) {
     union {
         double d;
         intptr_t i;
-    } s = {.i = x - (7LL<<48)};
+    } s = {.i = x - (1LL<<48)};
     return s.d;
 }
 
