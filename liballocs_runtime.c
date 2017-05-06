@@ -175,11 +175,11 @@ DEFINE_BUILTIN_EXCEPTION(Undefined_recursive_module)
 
 void ocaml_show(ocaml_value_t v) {
     if (IS_P(v)) {
-        fprintf(stderr, "%x\n", GET_P(v));
+        fprintf(stderr, "pointer-like: %"PRIxPTR"\n", (uintptr_t)GET_P(v));
     } else if (IS_I(v)) {
-        fprintf(stderr, "%d\n", GET_I(v));
+        fprintf(stderr, "integer-like: %"PRIiPTR"\n", GET_I(v));
     } else if (IS_D(v)) {
-        fprintf(stderr, "%f\n", GET_D(v));
+        fprintf(stderr, "float-like: %f\n", GET_D(v));
     } else {
         assert(false);
     }
