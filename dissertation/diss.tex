@@ -49,7 +49,7 @@
 \vspace*{60mm}
 \begin{center}
 \Huge
-\textbf{How to write a dissertation in \LaTeX} \\[5mm]
+\textbf{An observable OCaml via C and \lstinline!liballocs!} \\[5mm]
 Computer Science Tripos -- Part II \\[5mm]
 Churchill College \\[5mm]
 \today  % today's date
@@ -171,15 +171,22 @@ extent for a comparable purpose.
 
 \section{Closures}
 
+C allows function pointers to be stored and passed around in variables. These variables point to the start of the function's machine code in memory. Function calls are performed on function pointers by simply jumping to their address (using the \lstinline{call} instruction).
+
+The C language has no notion of closures, which OCaml requires to provide support for lexical scoping of variables in first-class functions. Closures are conceptually a tuple of the function pointer and the ``environment'' of the closure, which contains information about the free variables of the closure.
+
+We would like our closure pointers to be behaviourally equivalent to a function pointer from the C caller's perspective, i.e. calling
+\lstinline{closure(1, 2, 3)}
+(with the standard C calling convention) transparently translates to a call to
+\lstinline{closure_impl(1, 2, 3, env)}. This precludes techniques such as ``fat pointers'', where closures are stored as a tuple of two pointers. The disadvantage of such techniques includes the fact that each indirect function call must first check whether the variable is fat or not -- a significant runtime penalty.
+
+The technique that we use involves the creation of machine code stubs at runtime was pioneered by Breuel (TODO: cite). However, our implementation was developed completely from scratch, and many details differ from the approach outlined in the paper.
+
 \subsection{Runtime support}
 
-This consists of a function \lstinline{ocaml_liballocs_close(fun, n_args, env)}
+This consists of a function \lstinline{ocaml_liballocs_close(fun_impl, n_args, env)}
 which dynamically creates a 3-instruction stub in an executable buffer,
-returning what looks like a closed function pointer f. Calling
-\lstinline{f(1, 2, 3)}
-(with the standard C calling convention) transparently causes a call to
-\lstinline{fun(1, 2, 3, env)}.
-Note that this won't work on anything but 64-bit Linux.
+returning what looks like a closed function pointer f. Note that this won't work on anything but 64-bit Linux.
 
 Note that this code must be written to a memory page which has both write and execute permissions. (This has security implications which mean that additional precautionary steps must be taken if this technique is to be used in production code.)
 
@@ -191,7 +198,7 @@ This is the stub (when \lstinline{n_args} $\le 5$):
 
 \begin{lstlisting}
 mov REG_ENV, <env>
-mov r10, <fun>
+mov r10, <fun_impl>
 jmp r10
 \end{lstlisting}
 
@@ -216,16 +223,16 @@ This is what the stack transformation looks like: % TODO
 When \lstinline{n_args} $> 5$, env needs to get passed in on the stack instead.
 This is a little awkward because:
 \begin{enumerate}
-  \item our stub needs to clean up after itself -- it can no longer just tail-call into fun. This means that we need to return back into our closure, but the original return address needs to be preserved somehow;
-  \item we need to somehow tuck \lstinline{env} in under the return address stack slot, which would require an annoying amount of stack twiddling.
+    \item because we modify the stack, our stub can no longer just tail-call into \lstinline{fun_impl} -- it needs to clean up after itself;
+  \item we need to somehow tuck \lstinline{env} in under the return address stack slot, which would require a large amount of stack twiddling.
 \end{enumerate}
 
-Luckily, I came up with a neat trick which addresses both issues and remains performant. We can get away with just pushing \lstinline{env} on top (forming the (\lstinline{n_args}${}+2$)th argument), and pretending the return address is actually an argument (\lstinline{n_args}${}+1$)!
+Luckily, I came up with a neat trick which addresses both issues and remains performant. We can get away with just pushing \lstinline{env} on top (forming the (\lstinline{n_args}${}+2$)th argument), and pretending the return address is actually an argument (\lstinline{n_args}${}+1$).
 
 \begin{lstlisting}
-mov r11, env
+mov r11, <env>
 push r11
-mov r10, fun
+mov r10, <fun_impl>
 call r10
 pop rcx
 ret
@@ -237,21 +244,44 @@ This works because our compiler has control over the function signature of
 \lstinline{f}
 -- so in this case it'll just insert an additional \lstinline{void *ignored} argument before \lstinline{env}.
 
-Note also the deliberate choice of \lstinline{pop rcx} to remove the \lstinline{env} address from the stack, instead of the more symmetric \lstinline{pop r11} or more direct \lstinline{add rsp, 8}. This is a size optimisation -- the chosen instruction encodes in just one byte whereas the others require two or more bytes.
+Note also the deliberate choice of \lstinline{pop rcx} to remove the \lstinline{env} address from the stack (instead of, for instance \lstinline{pop r11} or \lstinline{add rsp, 8}). This is a size optimisation -- the chosen instruction encodes in just one byte.
 
-\subsection{Partial application}
+\subsection{Compiler support}
 
-\subsection{Recursive closures}
+As OCaml immediate value representations are immutable, we can simply copy the values of each free variable into the environment at the time of closure creation.
 
-\subsubsection{Self-recursive closure optimisation}
+There is no explicit annotation in the OCaml lambda IR to indicate that a closure must be created -- the compiler has to perform free-variable analysis to determine this itself. We handle two scenarios where closures must be created:
 
-\subsubsection{Mutually recursive closures}
+\begin{itemize}
+    \item \textbf{Function let-binding with non-empty free variable set}:
+        \ldots
+    \item \textbf{Partial application}:
+        \ldots
+\end{itemize}
 
+\subsubsection{Recursive and mutually recursive closures}
+
+Mutually recursive closures share an environment. Hence calls between two mutually recursive closures must pass the same environment pointer to each invocation.
+
+Self-recursive closures are a special case of this.
 
 
 \section{NaN boxing}
 
 In order to support polymorphic comparisons, we need to use a technique to be able to distinguish pointers from immediate ints and doubles.
+
+We use a technique called NaN boxing. Inspired by the WebKit JSCore
+
+\begin{tabular}{c c c}
+    63..52 & 51..0 & purpose \\
+    \lstinline!fff! & \lstinline!0000000000000! & Negative infinity \\
+    \lstinline!fff! & \lstinline!4000000000000! & Negative signalling NaN (canonical) \\
+    \lstinline!fff! & \lstinline!8000000000000! & Negative quiet NaN (canonical) \\
+    \lstinline!fff! & \lstinline!b000000000000! & Integers (50-bit space) \\
+    \lstinline!fff! & \lstinline!effffffffffff! & Integers (50-bit space) \\
+    \lstinline!fff! & \lstinline!f000000000000! & Pointers (48-bit space) \\
+    \lstinline!fff! & \lstinline!fffffffffffff! & Pointers (50-bit space)
+\end{tabular}
 
 
 \chapter{Evaluation}
