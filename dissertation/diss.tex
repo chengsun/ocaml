@@ -49,7 +49,7 @@
 \vspace*{60mm}
 \begin{center}
 \Huge
-\textbf{An observable OCaml via C and \lstinline!liballocs!} \\[5mm]
+\textbf{An observable OCaml via C and \texttt{liballocs}} \\[5mm]
 Computer Science Tripos -- Part II \\[5mm]
 Churchill College \\[5mm]
 \today  % today's date
@@ -66,7 +66,7 @@ Churchill College \\[5mm]
 \begin{tabular}{ll}
 Name:               & \bf Cheng Sun                       \\
 College:            & \bf Churchill College                     \\
-Project Title:      & \bf An observable OCaml via C and \lstinline!liballocs! \\
+Project Title:      & \bf An observable OCaml via C and \texttt{liballocs} \\
 Examination:        & \bf Computer Science Tripos -- Part II, July 2017  \\
 Word Count:         & \bf 1587\footnotemark[1] \\
 Project Originator: & Stephen Kell                    \\
@@ -169,7 +169,7 @@ extent for a comparable purpose.
     \end{enumerate}
 \end{enumerate}
 
-\subsection{\lstinline!module C!: the extended C abstract syntax tree datatype}
+\subsection{\texttt{module C}: the extended C abstract syntax tree datatype}
 
 I have defined a datatype representing a C-like syntax tree. Not all C features are modelled -- only the constructs that my compiler needs to produce. Furthermore, the datatype is slightly more expressive than standard ANSI C, as detailed later in section (TODO).
 
@@ -194,7 +194,7 @@ The following datatypes are defined:
 
 Refer to (appendix ? TODO) for the complete datatype definition.
 
-\subsection{\lstinline!module Translate!: compilation from lambda IR to C AST}
+\subsection{\texttt{module Translate}: compilation from lambda IR to C AST}
 
 \subsubsection{Inline statements}
 
@@ -204,21 +204,31 @@ The fact that C language makes a distinction between ``statements'' and ``expres
 let x = if foo then (if bar then 1 else 2) else 3
 \end{lstlisting}
 
+Clearly a direct translation of this wouldn't work, as in C \lstinline!if! statements cannot be used as expressions. (TODO footnote about ternary operator)
+
+The way that we handle this is by extending our \lstinline!C.expression! so
+that statements can become expressions.  We add a new constructor
+\lstinline!C_InlineRevStatements of C.statement! to the
+\lstinline!C.expression! type, which allows us to use any C statement as if it
+were an expression.
+
+By doing this, our example from above can be translated directly, simply by wrapping the \lstinline!C_If! statements in ``inline statements''.
+
 \subsubsection{Inline function definitions (lambdas)}
 
 \begin{lstlisting}
 let x = (fun x -> x + 1) 2
 \end{lstlisting}
 
-\subsection{\lstinline!module Fixup!: translation from extended-C AST to valid C AST}
+\subsection{\texttt{module Fixup}: translation from extended-C AST to valid C AST}
 
-\subsection{\lstinline!module Emitcode!: outputting C AST to a file}
+\subsection{\texttt{module Emitcode}: outputting C AST to a file}
 
 \subsection{Driver modification}
 
 Support was added to the \lstinline!ocamlc! driver binary to generate and output C code. A new flag \lstinline!-target-liballocs! was added. After the simplified lambda IR is generated as usual, the presence of this flag will trigger the additional phase of compiling and outputting the C code in addition to running the rest of the compiler pipeline.
 
-\section{Standard library: \lstinline!module Pervasives!}
+\section{Standard library: \texttt{module Pervasives}}
 
 \subsection{C runtime}
 
@@ -228,7 +238,7 @@ I only implemented the functions that were necessary for the subset of stdlib fu
 
 See appendix TODO for details.
 
-\subsection{Printing to \lstinline!stdout! and \lstinline!stderr!}
+\subsection{Printing to \texttt{stdout} and \texttt{stderr}}
 
 Two sets of C runtime functions had to be implemented in order to support Pervasives functions such as \lstinline!print_int!. Int-to-string formatting and string printing are all delegated to the runtime library.
 
@@ -422,9 +432,42 @@ I use this mechanism to support exception handling. TODO
   }
 \end{lstlisting}
 
+\lstinline!setjmp! allows control flow to ``unwind'' to the last installed exception handler. The value of the exception currently being handled is stored in a global variable known to the compiler, so that exception handlers can pattern match against it. The exception handler is uninstalled (``popped'' off the stack of exception handlers) when:
+\begin{itemize}
+  \item a try block finishes without raising; or
+  \item a handler starts executing. This prevents exceptions raised inside the handler from incorrectly being recursively handled by itself.
+\end{itemize}
+
 The memory representation of an exception contains the stringified name of the exception, so that if it is propagated all the way up unhandled, the runtime can print the name of the exception before aborting.
 
 \subsection{Runtime support}
+
+\subsubsection{Toplevel handler}
+
+If an exception propagates all the way to the top without being handled successfully, the runtime needs to print an error message and abort the program. This is done by installing a root handler in \lstinline!main! before calling into OCaml code.
+
+Assuming that the module being compiled is called \lstinline!Test!, the following is the C \lstinline!main! function:
+
+\begin{lstlisting}
+void Test__init();
+
+int main() {
+    // set up root exception handler
+    OCAML_LIBALLOCS_EXN_PUSH();
+    if (0 == OCAML_LIBALLOCS_EXN_SETJMP()) {
+        Test__init();
+        return 0;
+    } else { // catch
+        OCAML_LIBALLOCS_EXN_POP();
+        fprintf(stderr, "Uncaught OCaml exception: %s\n",
+                (const char *)
+                  GET_P(GET_P(ocaml_liballocs_get_exn())[0]));
+        return 1;
+    }
+}
+\end{lstlisting}
+
+\subsubsection{Builtin exceptions}
 
 A number of important exceptions are built in fairly deep in the OCaml language, surprisingly even outside of the \lstinline!Pervasives! module. OCaml raises some of these exceptions specially for various reasons -- for example the \lstinline!Division_by_zero! OCaml exception is raised when the corresponding FPU exception occurs.
 
@@ -432,7 +475,7 @@ As these are not defined in the OCaml part of the standard library, we have to m
 
 We use the C preprocessor quote trick to succinctly define the list of builtin exceptions statically.
 
-\begin{lstinline}
+\begin{lstlisting}
 #define _QUOTE(x) #x
 #define QUOTE(x) _QUOTE(x)
 #define DEFINE_BUILTIN_EXCEPTION(name) \
@@ -445,7 +488,7 @@ We use the C preprocessor quote trick to succinctly define the list of builtin e
 DEFINE_BUILTIN_EXCEPTION(Match_failure)
 DEFINE_BUILTIN_EXCEPTION(Assert_failure)
 \ldots
-\end{lstinline}
+\end{lstlisting}
 
 \chapter{Evaluation}
 
