@@ -1067,9 +1067,16 @@ and lambda_to_trev_statements lam =
       let trev_body = lambda_to_trev_statements lbody in
       let trev_hand = lambda_to_trev_statements lhandler in
       let (ctype, sl_body, sl_hand) = unify_revsts ~hint:"trywith" trev_body trev_hand in
+      let pop_statement = C_Expression (C_FunCall (C_GlobalVariable "OCAML_LIBALLOCS_EXN_POP", [])) in
+      let body_var = Ident.create "_try_value" in
+      let sl_body = assign_last_value_of_statement (ctype,body_var) (ctype,sl_body) in
+      let sl_body = C_Expression (C_Variable body_var) :: pop_statement :: sl_body @ [
+          C_VarDeclare (ctype, C_Variable body_var, None)
+        ]
+      in
       let sl_hand = sl_hand @ [
           C_VarDeclare (C_Boxed, C_Variable param, Some (C_FunCall (C_GlobalVariable "ocaml_liballocs_get_exn", [])))
-          ; C_Expression (C_FunCall (C_GlobalVariable "OCAML_LIBALLOCS_EXN_POP", []))
+          ; pop_statement
         ]
       in
       ctype,

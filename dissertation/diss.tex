@@ -216,9 +216,21 @@ let x = (fun x -> x + 1) 2
 
 \subsection{Driver modification}
 
+Support was added to the \lstinline!ocamlc! driver binary to generate and output C code. A new flag \lstinline!-target-liballocs! was added. After the simplified lambda IR is generated as usual, the presence of this flag will trigger the additional phase of compiling and outputting the C code in addition to running the rest of the compiler pipeline.
+
 \section{Standard library: \lstinline!module Pervasives!}
 
+\subsection{C runtime}
+
+The Pervasives module exposes (and internally uses) a large number of external predefined runtime functions (such as \lstinline!caml_sys_exit!), normally provided by the OCaml C runtime library. However, this library makes many assumptions about OCaml's tagged value representation, and is deeply integrated with the garbage collector. Hence new implementations of these functions had to be made.
+
+I only implemented the functions that were necessary for the subset of stdlib functionality that was required to run my tests and benchmarks.
+
+See appendix TODO for details.
+
 \subsection{Printing to \lstinline!stdout! and \lstinline!stderr!}
+
+Two sets of C runtime functions had to be implemented in order to support Pervasives functions such as \lstinline!print_int!. Int-to-string formatting and string printing are all delegated to the runtime library.
 
 \section{Inter-module linking}
 
@@ -369,7 +381,7 @@ We use a technique called NaN boxing. Inspired by the WebKit JSCore
 
 \section{Exceptions}
 
-Exceptions in the OCaml language are fairly typical -- a \lstinline!raise Foo! causes the exception \lstinline!Foo! to propagate up through stack frames until a \lstinline!try _ with Foo -> _! block is found.
+OCaml has support for exceptions: -- a \lstinline!raise Foo! causes the exception \lstinline!Foo! to propagate up through stack frames until a \lstinline!try _ with Foo -> _! block is found.
 
 Interestingly, exceptions is one of the cases where the lambda IR is more complex than the OCaml language. Lambda distinguishes between static (local) exceptions, and non-static ones.
 
@@ -409,6 +421,31 @@ I use this mechanism to support exception handling. TODO
     // second time
   }
 \end{lstlisting}
+
+The memory representation of an exception contains the stringified name of the exception, so that if it is propagated all the way up unhandled, the runtime can print the name of the exception before aborting.
+
+\subsection{Runtime support}
+
+A number of important exceptions are built in fairly deep in the OCaml language, surprisingly even outside of the \lstinline!Pervasives! module. OCaml raises some of these exceptions specially for various reasons -- for example the \lstinline!Division_by_zero! OCaml exception is raised when the corresponding FPU exception occurs.
+
+As these are not defined in the OCaml part of the standard library, we have to manually instantiate these exceptions in our own C runtime library.
+
+We use the C preprocessor quote trick to succinctly define the list of builtin exceptions statically.
+
+\begin{lstinline}
+#define _QUOTE(x) #x
+#define QUOTE(x) _QUOTE(x)
+#define DEFINE_BUILTIN_EXCEPTION(name) \
+    ocaml_value_t __##name[2] = { \
+        NEW_P((generic_datap_t) QUOTE(name)), \
+        NEW_I(0) \
+    }; \
+    ocaml_value_t *name = __##name;
+
+DEFINE_BUILTIN_EXCEPTION(Match_failure)
+DEFINE_BUILTIN_EXCEPTION(Assert_failure)
+\ldots
+\end{lstinline}
 
 \chapter{Evaluation}
 
