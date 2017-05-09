@@ -169,6 +169,86 @@ extent for a comparable purpose.
     \end{enumerate}
 \end{enumerate}
 
+\subsection{\lstinline!module C!: the extended C abstract syntax tree datatype}
+
+I have defined a datatype representing a C-like syntax tree. Not all C features are modelled -- only the constructs that my compiler needs to produce. Furthermore, the datatype is slightly more expressive than standard ANSI C, as detailed later in section (TODO).
+
+The following datatypes are defined:
+
+\begin{itemize}
+  \item
+    \lstinline!C.ctype! represents a C type.
+    
+    For instance, a function pointer of type \lstinline!void (*)(double *)! is represented as \lstinline!C_FunPointer (C_Void, C_Pointer C_Double)!.
+  \item
+    \lstinline!C.expression! represents an expression -- program fragments that evaluate to a value (possibly of type \lstinline!void!). This encompasses for instance literals, function calls, and binary operators.
+
+    For instance, the expression \lstinline!foo + 2! is represented as \lstinline!C_BinaryOp (C_Variable foo, "+", C_IntLiteral (Int64.of_int 2))! (where \lstinline!foo : Ident.t! is a value representing the \lstinline!foo! variable).
+
+	\item
+		\lstinline!C.statement! represents a statement -- language constructs such as \lstinline!if!, \lstinline!while!, \lstinline!return! etc. Note that statements typically contain one or more expressions, whereas expressions cannot* (TODO) contain statements.
+
+	\item
+		\lstinline!C.toplevel! represents a function or global variable declaration/definition at the toplevel.
+\end{itemize}
+
+Refer to (appendix ? TODO) for the complete datatype definition.
+
+\subsection{\lstinline!module Translate!: compilation from lambda IR to C AST}
+
+\subsubsection{Inline statements}
+
+The fact that C language makes a distinction between ``statements'' and ``expressions'' makes it less expressive than OCaml, as all core language features in OCaml are expressions. In particular, consider the translation of the following OCaml code:
+
+\begin{lstlisting}
+let x = if foo then (if bar then 1 else 2) else 3
+\end{lstlisting}
+
+\subsubsection{Inline function definitions (lambdas)}
+
+\begin{lstlisting}
+let x = (fun x -> x + 1) 2
+\end{lstlisting}
+
+\subsection{\lstinline!module Fixup!: translation from extended-C AST to valid C AST}
+
+\subsection{\lstinline!module Emitcode!: outputting C AST to a file}
+
+\subsection{Driver modification}
+
+\section{Standard library: \lstinline!module Pervasives!}
+
+\subsection{Printing to \lstinline!stdout! and \lstinline!stderr!}
+
+\section{Inter-module linking}
+
+Each \lstinline!.ml! file in OCaml implicitly defines a toplevel module. The approach I have taken is to represent each such module as an array of values, the order of which is defined by the OCaml compiler.
+
+At the lambda IR all inter-modular value/function accesses have already been lowered to \lstinline!getfield! operations on module objects. For instance, a call to \lstinline!Foo.bar! will already be represented by something like \lstinline!getfield Foo 1!. The ordering of values in modules is determined by the OCaml compiler based on the module's interface (\lstinline!.mli! file if it exists). This scheme implicitly handles data abstraction for us.
+
+A module \lstinline!foo.ml! generates a file \lstinline!foo.c! declaring global variable \lstinline!ocaml_value_t *Foo! (the ``module object'') and global function \lstinline!void Foo__init()! (the ``module constructor''). This module constructor function is idempotent, and after a call to it the module object is guaranteed to contain valid values. Furthermore all global side effects in \lstinline!foo.ml! are also performed when the module is initialised for the first time.
+
+Note that \lstinline!Foo! may well depend on other modules, such as \lstinline!Pervasives!. In \lstinline!foo.c! any such dependencies are represented as predeclarations of the module objects and constructors, and calls to constructors at the start of \lstinline!Foo__init!. The skeleton of such a module is shown in the listing below:
+
+\begin{lstlisting}
+#include "liballocs_runtime.h"
+
+void Pervasives__init();
+extern ocaml_value_t *Pervasives;
+
+ocaml_value_t *Foo;
+
+void Foo__init() {
+    if (Foo) {
+        return;
+    } else {
+        Pervasives__init();
+
+        // allocate and construct module object Foo
+    }
+}
+\end{lstlisting}
+
 \section{Closures}
 
 C allows function pointers to be stored and passed around in variables. These variables point to the start of the function's machine code in memory. Function calls are performed on function pointers by simply jumping to their address (using the \lstinline{call} instruction).
@@ -250,10 +330,12 @@ Note also the deliberate choice of \lstinline{pop rcx} to remove the \lstinline{
 
 As OCaml immediate value representations are immutable, we can simply copy the values of each free variable into the environment at the time of closure creation.
 
-There is no explicit annotation in the OCaml lambda IR to indicate that a closure must be created -- the compiler has to perform free-variable analysis to determine this itself. We handle two scenarios where closures must be created:
+There is no explicit annotation in the OCaml lambda IR to indicate that a closure must be created -- the compiler has to perform free-variable analysis to determine this itself. We handle three separate scenarios where closures must be created:
 
 \begin{itemize}
     \item \textbf{Function let-binding with non-empty free variable set}:
+        \ldots
+    \item \textbf{Anonymous lambda}:
         \ldots
     \item \textbf{Partial application}:
         \ldots
@@ -283,6 +365,50 @@ We use a technique called NaN boxing. Inspired by the WebKit JSCore
     \lstinline!fff! & \lstinline!fffffffffffff! & Pointers (50-bit space)
 \end{tabular}
 
+
+
+\section{Exceptions}
+
+Exceptions in the OCaml language are fairly typical -- a \lstinline!raise Foo! causes the exception \lstinline!Foo! to propagate up through stack frames until a \lstinline!try _ with Foo -> _! block is found.
+
+Interestingly, exceptions is one of the cases where the lambda IR is more complex than the OCaml language. Lambda distinguishes between static (local) exceptions, and non-static ones.
+
+Once again, because of the undocumented nature of the lambda IR, the semantics of these instructions were divined through reverse engineering and code diving.
+
+\subsection{Static exceptions}
+
+Static exceptions are confined to a lexically local scope -- i.e. the raise and the corresponding try are in the same function. The lambda instructions for these are \lstinline!Lstaticraise! and \lstinline!Lstaticcatch!.
+
+In this case, we can implement these using the C \lstinline!goto! feature, which allows control flow to jump non-linearly to another point in the same function.
+
+The structure gets compiled into the following construct:
+
+\begin{lstlisting}
+if (1) {
+    /* body */
+    // goto label_staticcatch_1;
+} else {
+label_staticcatch_1:;
+    /* handler */
+}
+\end{lstlisting}
+
+\subsection{Non-static exceptions}
+
+More generally an exception may unwind through several stack frames, and may be caught in different handlers depending on the dynamic runtime behaviour.
+
+C has a mechanism to perform ``non-local'' jumps using the special library calls \lstinline!setjmp! and \lstinline!longjmp!. A call to \lstinline!setjmp! will save the CPU registers at the point the function was called (notably, including the instruction and stack pointers) into a \lstinline!struct jmpbuf! that the user provides. Calling \lstinline!longjmp! will then restore the state of the program, so that execution flow resumes as if the original \lstinline!setjmp! returned for a second time. \lstinline!setjmp! will return non-zero iff it is returning for the second time.
+
+I use this mechanism to support exception handling. TODO
+
+\begin{lstlisting}
+  if (setjmp(jmp_buf) == 0) {
+    // first time
+    longjmp(jmp_buf);
+  } else {
+    // second time
+  }
+\end{lstlisting}
 
 \chapter{Evaluation}
 
