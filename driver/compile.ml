@@ -89,9 +89,10 @@ let implementation ppf sourcefile outputprefix =
             (fun lambda ->
               Simplif.simplify_lambda lambda
               ++ print_if ppf Clflags.dump_lambda Printlambda.lambda
-              ++ Bytegen.compile_implementation modulename
+              ++ (fun simp_lambda ->
+                 Bytegen.compile_implementation modulename simp_lambda
               ++ print_if ppf Clflags.dump_instr Printinstr.instrlist
-              ++ fun bytecode -> lambda, bytecode)
+              ++ fun bytecode -> simp_lambda, bytecode))
       in
       if !Clflags.target_liballocs then begin
         let c_code = Liballocs.compile_implementation modulename lambda in
