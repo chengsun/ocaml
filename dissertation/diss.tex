@@ -5,6 +5,7 @@
 \usepackage{graphicx}  % allows inclusion of PDF, PNG and JPG images
 \usepackage{verbatim}
 \usepackage{docmute}   % only needed to allow inclusion of proposal.tex
+\usepackage{amsmath}
 
 
 \usepackage{listings}       % Source code listings
@@ -273,59 +274,126 @@ void Foo__init() {
 
 \section{Closures}
 
-C allows function pointers to be stored and passed around in variables. These variables point to the start of the function's machine code in memory. Function calls are performed on function pointers by simply jumping to their address (using the \lstinline{call} instruction).
+C allows function references to be stored in variables, in the form of
+``function pointers'' containing the address of the start of the function's
+machine code. Calls are performed on function pointers by an indirect jump to
+the address (using the \lstinline!call! instruction).
 
-The C language has no notion of closures, which OCaml requires to provide support for lexical scoping of variables in first-class functions. Closures are conceptually a tuple of the function pointer and the ``environment'' of the closure, which contains information about the free variables of the closure.
+The C language has no notion of closures, which OCaml requires to provide
+support for lexical scoping of variables in first-class functions. Closures are
+conceptually a tuple of the function pointer and an environment, which stores
+the free variables of the closure. Hence, we need to add support for generating
+closures manually.
 
-We would like our closure pointers to be behaviourally equivalent to a function pointer from the C caller's perspective, i.e. calling
-\lstinline{closure(1, 2, 3)}
-(with the standard C calling convention) transparently translates to a call to
-\lstinline{closure_impl(1, 2, 3, env)}. This precludes techniques such as ``fat pointers'', where closures are stored as a tuple of two pointers. The disadvantage of such techniques includes the fact that each indirect function call must first check whether the variable is fat or not -- a significant runtime penalty.
+One way to represent closures is as ``fat pointers'', where each closure is
+stored as a tuple of two pointers. Note however that in OCaml a closure may be
+used whenever a function is expected, so each indirect function call would now
+have to check whether the function reference is fat or not -- a significant
+runtime cost.
 
-The technique that we use involves the creation of machine code stubs at runtime was pioneered by Breuel (TODO: cite). However, our implementation was developed completely from scratch, and many details differ from the approach outlined in the paper.
+A unified way to call closures and function pointers is desired. In
+particular, we'd like the act of closing a C function \lstinline!f_impl! with
+an environment \lstinline!env! to produce a fresh function pointer
+\lstinline!f_closure!, such that calling
+\lstinline!f_closure(1, 2, 3)!
+with the standard C calling convention is equivalent to a call to
+\lstinline!f_impl(1, 2, 3, env)!.
+
+The technique that we use involves the creation of machine code stubs at
+runtime. This was pioneered by Breuel (TODO: cite). However, our implementation
+was developed completely from scratch, and many details differ from the
+approach outlined in the paper.
 
 \subsection{Runtime support}
 
-This consists of a function \lstinline{ocaml_liballocs_close(fun_impl, n_args, env)}
-which dynamically creates a 3-instruction stub in an executable buffer,
-returning what looks like a closed function pointer f. Note that this won't work on anything but 64-bit Linux.
+An internal C function \lstinline{ocaml_liballocs_close(f_impl, n_args, env)}
+was written, which performs the closing operation as previously described.
+\lstinline!f_impl! is the C implementation of the closure -- a function which
+takes \lstinline!n_args! arguments along with an extra argument containing the environment.
 
-Note that this code must be written to a memory page which has both write and execute permissions. (This has security implications which mean that additional precautionary steps must be taken if this technique is to be used in production code.)
+When \lstinline!ocaml_liballocs_close! is
+invoked, a small executable stub is written into an executable
+buffer, with the two pointers \lstinline!f_impl! and \lstinline!env! baked in.
+Then the address of the start of this stub is returned. The stub is described
+in detail below.
 
-This area of memory is bump allocated. Note that a garbage collector would need to know about this.
+Conceptually, the operation can be described as JIT-compiling the following
+snippet of pseudo-C code at runtime: (NB: caveat for $> 5$ arguments TODO)
+
+\begin{lstlisting}
+ocaml_value_t f_closure(ocaml_value_t arg1,
+                        ...,
+                        ocaml_value_t argn)
+{
+    return f_impl(arg1, ..., argn, env);
+}
+\end{lstlisting}
+
+Note that as implemented, this won't work on anything but 64-bit Linux.
+
+Note that this code must be written to a memory page which has both write and
+execute permissions. (This has security implications which mean that additional
+precautionary steps must be taken if this technique is to be used in production
+code.)
+
+This area of memory is bump allocated. Note that a garbage collector would need
+to be taught about this.
 
 \subsubsection{Closing functions that take $\le 5$ arguments}
 
-This is the stub (when \lstinline{n_args} $\le 5$):
+An Application Binary Interface (ABI) specifies a standardised calling
+convention which programs and libraries adhere to. This includes the
+specification of the location in registers or memory where function arguments
+are passed.
+
+On POSIX compliant systems (this does not include Windows!) C uses AMD's x86-64
+ABI. The first six arguments are passed in registers in a particular order,
+shown in the table below. Hence, when closing a function \lstinline!f! which
+originally took five or fewer arguments, there is space to pass \lstinline!env!
+in another register.
+
+Conveniently, all six argument registers are also caller-preserved whether they
+are used to pass arguments or not. This means that our stub is allowed to
+overwrite (or ``clobber'') any of them without having to clean up afterwards.
+There are also several other caller-preserved registers, notably
+\lstinline!r10!, which we will also make use of.
+
+The following is the table of the register used for each argument in the x86-64
+ABI.
+
+\begin{tabular}{ c | c }
+  $n$th argument & register \\
+  \hline
+  1 & \lstinline!rdi! \\
+  2 & \lstinline!rsi! \\
+  3 & \lstinline!rdx! \\
+  4 & \lstinline!rcx! \\
+  5 & \lstinline!r8! \\
+  6 & \lstinline!r9!
+\end{tabular}
+
+We shall place \lstinline!env! into the $(\text{\lstinline|n\_args|}+1)$-th argument. Call the
+corresponding register \lstinline!REG_ENV!.
+
+This is the assembly listing for the machine code generated:
 
 \begin{lstlisting}
 mov REG_ENV, <env>
-mov r10, <fun_impl>
+mov r10, <f_impl>
 jmp r10
 \end{lstlisting}
 
-This works by writing the two 8-byte addresses directly into the machine code, and using immediate \lstinline{mov} instructions to load them into the required registers. Then the function is tail-called into.
-
-This is what the stack transformation looks like: % TODO
-
-\begin{tabular}{ c | c }
-  \lstinline!n_args! & \lstinline!REG_ENV! \\
-  \hline
-  0 & \lstinline!rdi! \\
-  1 & \lstinline!rsi! \\
-  2 & \lstinline!rdx! \\
-  3 & \lstinline!rcx! \\
-  4 & \lstinline!r8! \\
-  5 & \lstinline!r9! \\
-  $> 5$ & passed on stack instead (see below) \\
-\end{tabular}
+This works by using two 8-byte immediate \lstinline!mov! instructions, which
+each load a fixed constant from the program code, which happen to correspond to
+our two pointers \lstinline!env! and \lstinline!f_impl!.
+Then \lstinline!f_impl! is tail-called into.
 
 \subsubsection{Closing functions that take $> 5$ arguments}
 
 When \lstinline{n_args} $> 5$, env needs to get passed in on the stack instead.
 This is a little awkward because:
 \begin{enumerate}
-    \item because we modify the stack, our stub can no longer just tail-call into \lstinline{fun_impl} -- it needs to clean up after itself;
+    \item because we modify the stack, our stub can no longer just tail-call into \lstinline{f_impl} -- it needs to clean up after itself;
   \item we need to somehow tuck \lstinline{env} in under the return address stack slot, which would require a large amount of stack twiddling.
 \end{enumerate}
 
@@ -334,7 +402,7 @@ Luckily, I came up with a neat trick which addresses both issues and remains per
 \begin{lstlisting}
 mov r11, <env>
 push r11
-mov r10, <fun_impl>
+mov r10, <f_impl>
 call r10
 pop rcx
 ret
@@ -469,11 +537,9 @@ int main() {
 
 \subsubsection{Builtin exceptions}
 
-A number of important exceptions are built in fairly deep in the OCaml language, surprisingly even outside of the \lstinline!Pervasives! module. OCaml raises some of these exceptions specially for various reasons -- for example the \lstinline!Division_by_zero! OCaml exception is raised when the corresponding FPU exception occurs.
+A number of important exceptions are embedded fairly deep in the OCaml language, surprisingly at a lower level than even the \lstinline!Pervasives! module. OCaml raises some of these exceptions specially for various reasons -- for example the \lstinline!Division_by_zero! OCaml exception is raised when the corresponding FPU exception occurs.
 
-As these are not defined in the OCaml part of the standard library, we have to manually instantiate these exceptions in our own C runtime library.
-
-We use the C preprocessor quote trick to succinctly define the list of builtin exceptions statically.
+The list of predefined exceptions can be found in \lstinline!typing/predef.ml!. We manually declare and instantiate these exceptions in our own C runtime library, using the C preprocessor quote trick to succinctly define the list of builtin exceptions statically:
 
 \begin{lstlisting}
 #define _QUOTE(x) #x
@@ -487,7 +553,7 @@ We use the C preprocessor quote trick to succinctly define the list of builtin e
 
 DEFINE_BUILTIN_EXCEPTION(Match_failure)
 DEFINE_BUILTIN_EXCEPTION(Assert_failure)
-\ldots
+...
 \end{lstlisting}
 
 \chapter{Evaluation}
