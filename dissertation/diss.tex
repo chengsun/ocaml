@@ -223,6 +223,24 @@ let x = (fun x -> x + 1) 2
 
 \subsection{\texttt{module Fixup}: translation from extended-C AST to valid C AST}
 
+Similar to \lstinline!Translate!, the implementation of \lstinline!Fixup! is done via a recursive tree-walk. Three mutually recursive functions each visit different types of nodes:
+
+\begin{lstlisting}
+var fixup_let_defs :
+  Fixup.t -> C.statement list -> C.let_definition list ->
+  C.statement list
+
+var fixup_expression :
+  Fixup.t -> C.statement list -> C.expression ->
+  C.statement list * C.expression
+
+var fixup_rev_statements :
+  Fixup.t -> C.statement list -> C.statement list ->
+  C.statement list
+\end{lstlisting}
+
+Each fixup function is invoked in the form \lstinline!fixup_foo t accum foo!
+
 \subsection{\texttt{module Emitcode}: outputting C AST to a file}
 
 \subsection{Driver modification}
