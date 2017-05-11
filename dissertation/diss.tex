@@ -390,19 +390,55 @@ Then \lstinline!f_impl! is tail-called into.
 
 \subsubsection{Closing functions that take $> 5$ arguments}
 
-When \lstinline{n_args} $> 5$, env needs to get passed in on the stack instead.
-This is a little awkward because:
+When \lstinline!n_args! $> 5$, \lstinline!env! needs to get passed in on the
+stack instead.
+
+\begin{tabular}{c}
+  \lstinline!arg_7!
+  \\ \hline
+  \vdots
+  \\ \hline
+  \lstinline!arg_n!
+  \\ \hline\hline
+  return address to caller
+\end{tabular}
+
+However, implementing the direct solution is a little awkward because:
 \begin{enumerate}
-  \item because we modify the stack, our stub can no longer just tail-call
-    into \lstinline{f_impl} -- it needs to clean up after itself;
-  \item we need to somehow tuck \lstinline{env} in under the return address
-    stack slot, which would require a large amount of stack twiddling.
+  \item when we modify the stack, our stub can no longer just tail-call
+    into \lstinline!f_impl! -- before returning to the caller we need to undo
+    our stack transformation;
+  \item we need to tuck \lstinline!env! in under the return address
+    stack slot, which would require a large number of stack-twiddling
+    instructions.
 \end{enumerate}
 
 Luckily, I came up with a neat trick which addresses both issues and remains
-performant. We can get away with just pushing \lstinline{env} on top (forming
-the (\lstinline{n_args}${}+2$)th argument), and pretending the return address
-is actually an argument (\lstinline{n_args}${}+1$).
+performant. It turns out that we can get away with just pushing \lstinline!env! on top of the stack as follows, before \lstinline!call!ing into \lstinline!f_impl!. The state of the stack on entry to \lstinline!f_impl! is:
+
+\begin{tabular}{c}
+  \lstinline!arg_7!
+  \\ \hline
+  \vdots
+  \\ \hline
+  \lstinline!arg_n!
+  \\ \hline
+  return address to caller
+  \\ \hline
+  \lstinline!env!
+  \\ \hline\hline
+  return address to stub
+\end{tabular}
+
+By treating the return address to caller as an extra (unused) argument to
+\lstinline!f_impl!, it can now access \lstinline!env! through its
+(\lstinline{n_args}${}+2$)th argument.
+
+This trick works because our compiler has control over the function signature
+of \lstinline{f} -- in this case it'll just insert an additional
+\lstinline{void *ignored} argument before \lstinline{env}.
+
+Now the machine code stub looks like this:
 
 \begin{lstlisting}
 mov r11, <env>
@@ -413,13 +449,7 @@ pop rcx
 ret
 \end{lstlisting}
 
-This is what the stack transformation looks like: % TODO
-
-This works because our compiler has control over the function signature of
-\lstinline{f} -- so in this case it'll just insert an additional
-\lstinline{void *ignored} argument before \lstinline{env}.
-
-Note also the deliberate choice of \lstinline{pop rcx} to remove the
+Note the deliberate choice of \lstinline{pop rcx} to remove the
 \lstinline{env} address from the stack (instead of, for instance
 \lstinline{pop r11} or \lstinline{add rsp, 8}). This is a size optimisation --
 the chosen instruction encodes in just one byte.
@@ -457,22 +487,22 @@ In order to support polymorphic comparisons, we need to use a technique to be ab
 
 We use a technique called NaN boxing. Inspired by the WebKit JSCore
 
-\begin{tabular}{c c c}
-    63..52 & 51..0 & purpose \\
-    \lstinline!fff! & \lstinline!0000000000000! & Negative infinity \\
-    \lstinline!fff! & \lstinline!4000000000000! & Negative signalling NaN (canonical) \\
-    \lstinline!fff! & \lstinline!8000000000000! & Negative quiet NaN (canonical) \\
-    \lstinline!fff! & \lstinline!b000000000000! & Integers (50-bit space) \\
-    \lstinline!fff! & \lstinline!effffffffffff! & Integers (50-bit space) \\
-    \lstinline!fff! & \lstinline!f000000000000! & Pointers (48-bit space) \\
-    \lstinline!fff! & \lstinline!fffffffffffff! & Pointers (50-bit space)
+\begin{tabular}{c c | c c | c}
+    63..52 & 51..0 & 63..52 & 51..0 & purpose \\
+    \lstinline!fff! & \lstinline!0000000000000! & \lstinline!fff! & \lstinline!1000000000000! & Negative infinity \\
+    \lstinline!fff! & \lstinline!4000000000000! & \lstinline!fff! & \lstinline!5000000000000! & Negative signalling NaN (canonical) \\
+    \lstinline!fff! & \lstinline!8000000000000! & \lstinline!fff! & \lstinline!9000000000000! & Negative quiet NaN (canonical) \\
+    \lstinline!fff! & \lstinline!b000000000000! & \lstinline!fff! & \lstinline!c000000000000! & Integers (50-bit space) \\
+    \lstinline!fff! & \lstinline!effffffffffff! & \lstinline!fff! & \lstinline!fffffffffffff! & Integers (50-bit space) \\
+    \lstinline!fff! & \lstinline!f000000000000! & \lstinline!000! & \lstinline!0000000000000! & Pointers (48-bit space) \\
+    \lstinline!fff! & \lstinline!fffffffffffff! & \lstinline!000! & \lstinline!0ffffffffffff! & Pointers (48-bit space)
 \end{tabular}
 
 
 
 \section{Exceptions}
 
-OCaml has support for exceptions: -- a \lstinline!raise Foo! causes the
+OCaml has support for exceptions: a \lstinline!raise Foo! causes the
 exception \lstinline!Foo! to propagate up through stack frames until a
 \lstinline!try _ with Foo -> _! block is found.
 
@@ -561,9 +591,10 @@ module. OCaml raises some of these exceptions specially for various reasons --
 for example the \lstinline!Division_by_zero! OCaml exception is raised when the
 corresponding FPU exception occurs.
 
+As these exceptions are not defined in the usual way, in OCaml code, we must
+manually declare and instantiate these exceptions in our own C runtime library.
 The list of predefined exceptions can be found in \lstinline!typing/predef.ml!.
-We manually declare and instantiate these exceptions in our own C runtime
-library, using the C preprocessor quote trick to succinctly define the list of
+The C preprocessor quote trick allows us to succinctly define the list of
 builtin exceptions statically:
 
 \begin{lstlisting}
