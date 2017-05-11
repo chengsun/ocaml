@@ -189,7 +189,22 @@ this type.
 \subsection{\texttt{Lambda} IR}
 
 For our purposes, \lstinline!lambda! is the most important representation in
-the OCaml compiler, as it is the starting point for our compiler.
+the OCaml compiler, as it is the starting point for our compiler. This
+Intermediate Representation (IR) is based on a heavily augmented lambda calculus.
+
+The pass that compiles \lstinline!Typedtree! into \lstinline!Lambda! IR most
+significantly desugars pattern matching into elementary conditionals and
+destructuring operations. Also class and module constructs are compiled down to
+records.
+
+Notably this pass does NOT provide:
+
+\begin{itemize}
+    \item type preservation -- see section TODO
+    \item uncurrying\footnote{Significantly for us this means converting
+        partial applications and ``overapplications'' into complete applications} -- see section TODO
+    \item closure conversion -- see section TODO
+\end{itemize}
 
 
 \section{\texttt{liballocs}}
@@ -458,6 +473,12 @@ void Foo__init() {
     }
 }
 \end{lstlisting}
+
+\section{Type information for \texttt{liballocs}}
+
+\subsection{\texttt{Pmakeblock}}
+
+\subsection{\texttt{structured\char`_constant}}
 
 \section{Closures}
 
