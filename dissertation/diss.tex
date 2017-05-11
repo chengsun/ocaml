@@ -10,6 +10,7 @@
 
 \usepackage{listings}       % Source code listings
 \usepackage{courier}        % courier font
+\usepackage{textcomp}       % straight quotes
 \lstset{
   basicstyle=\ttfamily
 , commentstyle=\color{Green}
@@ -21,6 +22,7 @@
 , framextopmargin=50pt
 , columns=fullflexible,keepspaces
 , escapeinside={(*}{*)}
+, upquote=true
 %, frame=bottomline
       }
 
@@ -75,7 +77,7 @@ Supervisor:         & Stephen Kell                    \\
 \end{tabular}
 }
 \footnotetext[1]{This word count was computed
-by \texttt{detex diss.tex | tr -cd '0-9A-Za-z $\tt\backslash$n' | wc -w}
+by \lstinline!detex diss.tex | tr -cd '0-9A-Za-z \\n' | wc -w!
 }
 \stepcounter{footnote}
 
@@ -149,6 +151,51 @@ extent for a comparable purpose.
 
 %TODO
 
+\section{The OCaml compiler -- front-end}
+
+The OCaml compiler has several stages:
+
+TODO diagram
+
+The front-end of the OCaml compiler refers to the 
+
+\subsection{Common types}
+
+The compiler represents the name of all variables as \lstinline!Ident.t!, which
+is conceptually a tuple of the variable name string and a unique integer. Each
+let binding is given its own unique \lstinline!Ident.t! -- once the frontend
+has resolved variables using OCaml's scoping and shadowing rules, the rest of
+the compiler has the guarantee of globally unique\footnote{Up to module
+boundary -- at the \lstinline!lambda! level intermodule variable references
+have already boiled down to record field accesses.} identifier names.
+
+A \lstinline!type_expr! represents the OCaml type of a particular expression.
+
+\subsection{\texttt{Parsetree} and \texttt{Typedtree}}
+
+The very first representation used by the compiler is \lstinline!Parsetree!.
+This is an Abstract Syntax Tree produced directly from the OCaml source code by
+the parser. At this stage all original OCaml features are still present, before
+any desugaring has happened yet. For instance, pattern matches are as
+originally expressed in the source code.
+
+The typing phase takes a \lstinline!Parsetree! and produces a
+\lstinline!Typedtree!. This is the phase that ensures that all expressions are
+well-typed. The \lstinline!Typedtree! is almost identical to
+\lstinline!Parsetree!. The difference is that every \lstinline!expression! node
+in the tree is augmented with the \lstinline!type_expr! -- the expression of
+this type.
+
+\subsection{\texttt{Lambda} IR}
+
+For our purposes, \lstinline!lambda! is the most important representation in
+the OCaml compiler, as it is the starting point for our compiler.
+
+
+\section{\texttt{liballocs}}
+
+\lstinline!liballocs! is TODO
+
 
 \chapter{Implementation}
 
@@ -172,22 +219,86 @@ extent for a comparable purpose.
 
 \subsection{\texttt{module C}: the extended C abstract syntax tree datatype}
 
-I have defined a datatype representing a C-like syntax tree. Not all C features are modelled -- only the constructs that my compiler needs to produce. Furthermore, the datatype is slightly more expressive than standard ANSI C, as detailed later in section (TODO).
+I have defined a datatype representing a C-like syntax tree. Not all C features
+are modelled -- only the constructs that my compiler needs to produce.
+
+On the other hand, the tree datatype is slightly more expressive than standard
+ANSI C. These extra features are rewritten into standard C in a later pass, as
+detailed later in section (TODO).
 
 The following datatypes are defined:
 
 \begin{itemize}
   \item
-    \lstinline!C.ctype! represents a C type.
-    
-    For instance, a function pointer of type \lstinline!void (*)(double *)! is represented as \lstinline!C_FunPointer (C_Void, C_Pointer C_Double)!.
-  \item
-    \lstinline!C.expression! represents an expression -- program fragments that evaluate to a value (possibly of type \lstinline!void!). This encompasses for instance literals, function calls, and binary operators.
+    \lstinline!C.ctype! represents a C type. Significant constructors include:
 
-    For instance, the expression \lstinline!foo + 2! is represented as \lstinline!C_BinaryOp (C_Variable foo, "+", C_IntLiteral (Int64.of_int 2))! (where \lstinline!foo : Ident.t! is a value representing the \lstinline!foo! variable).
+    \begin{itemize}
+        \item \lstinline!C_Pointer of C.ctype!
+        \item \lstinline!C_Boxed! representing a generic OCaml value -- either
+            an immediate int, immediate double or a pointer to a heap-allocated
+            object. The representation of this is discussed in detail in
+            section TODO
+        \item \lstinline!C_Int!
+        \item \lstinline!C_Double!
+        \item \lstinline!C_Struct of Ident.t * (C.ctype * string) list!
+        \item \lstinline!C_FunPointer of C.ctype * C.ctype list! taking return
+            type and argument types
+    \end{itemize}
+
+    For instance, a function pointer of type \lstinline!void (*)(double *)! is
+    represented as \lstinline!C_FunPointer (C_Void, C_Pointer C_Double)!.
+  \item
+    \lstinline!C.expression! represents an expression -- program fragments that
+    evaluate to a value (possibly of type \lstinline!void!). Notable
+    constructors for this datatype include:
+
+    \begin{itemize}
+        \item Variable names. Two types are supported:
+            \begin{itemize}
+                \item \lstinline!C_GlobalVariable of string!
+                \item \lstinline!C_Variable of Ident.t!
+            \end{itemize}
+            TODO explain
+        \item Data literals of various types:
+            \begin{itemize}
+                \item \lstinline!C_IntLiteral of int64!
+                \item \lstinline!C_StringLiteral of string!
+                \item \lstinline!C_FloatLiteral of string! \footnote{Floats are
+                    always represented in the OCaml compiler as strings, to
+                    prevent rounding errors.}
+                \item \lstinline!C_CharLiteral of char!
+                \item \lstinline!C_PointerLiteral of int! \footnote{This
+                    doesn't take \lstinline!int64! as might be expected, as it
+                    is used to represent lambda's \lstinline!Const_pointer of int!,
+                    which is only ever used by the compiler to represent
+                    \lstinline!NULL!.}
+            \end{itemize}
+        \item \lstinline!C_FunCall of C.expression * C.expression list!
+            represents function calls as an expression evaluating to the
+            function to be called, and the list of arguments.
+        \item \lstinline!C_BinaryOp of string * expression * expression!
+            represents all arithmetic and logical binary operations.
+    \end{itemize}
+
+    A variable is represented as 
+
+    For instance, the expression \lstinline!foo + 2! is represented as
+    \begin{lstlisting}
+    C_BinaryOp (C_Variable foo, "+", C_IntLiteral (Int64.of_int 2))\end{lstlisting}%
+    (where \lstinline!foo : Ident.t! is a value representing the name of the
+    \lstinline!foo! variable).
 
 	\item
-		\lstinline!C.statement! represents a statement -- language constructs such as \lstinline!if!, \lstinline!while!, \lstinline!return! etc. Note that statements typically contain one or more expressions, whereas expressions cannot* (TODO) contain statements.
+		\lstinline!C.statement! represents a statement -- language constructs such as:
+        
+        \begin{itemize}
+            \item \lstinline!if! TODO explain these
+            \item \lstinline!while!
+            \item \lstinline!return!
+            \item \lstinline!C_Expression!
+            \item etc.
+        \end{itemize}
+        Note that statements typically contain one or more expressions, whereas expressions cannot* (TODO) contain statements.
 
 	\item
 		\lstinline!C.toplevel! represents a function or global variable declaration/definition at the toplevel.
@@ -199,13 +310,28 @@ Refer to (appendix ? TODO) for the complete datatype definition.
 
 \subsubsection{Inline statements}
 
-The fact that C language makes a distinction between ``statements'' and ``expressions'' makes it less expressive than OCaml, as all core language features in OCaml are expressions. In particular, consider the translation of the following OCaml code:
+The fact that C language makes a distinction between ``statements'' and
+``expressions'' makes it less expressive than OCaml, as all core language
+features in OCaml are expressions. In particular, consider the translation of
+the following OCaml code:
 
 \begin{lstlisting}
 let x = if foo then (if bar then 1 else 2) else 3
 \end{lstlisting}
 
-Clearly a direct translation of this wouldn't work, as in C \lstinline!if! statements cannot be used as expressions. (TODO footnote about ternary operator)
+Clearly a direct translation of this wouldn't be possible, as \lstinline!if!
+statements cannot be used as expressions in C.\footnote{
+    The ternary operator \lstinline!?:! exists in C as an expression analogue
+    of \lstinline!if!.  However, it isn't used by my compiler for two reasons.
+    Firstly in the interests of readability -- nested ternary operators get
+    hard to read very quickly. The second reason is that debuggability of if
+    statements would be hampered by the fact that debuggers tend not to be able
+    to single-step easily from the condition to the body.
+
+    Even if the ternary operator were used, there are other statements that
+    cannot be made into expressions as easily. An example is the let-statement,
+    which translates to variable declarations in C. Hence, a solution to this
+    general problem would still be required.}
 
 The way that we handle this is by extending our \lstinline!C.expression! so
 that statements can become expressions.  We add a new constructor
@@ -213,7 +339,13 @@ that statements can become expressions.  We add a new constructor
 \lstinline!C.expression! type, which allows us to use any C statement as if it
 were an expression.
 
-By doing this, our example from above can be translated directly, simply by wrapping the \lstinline!C_If! statements in ``inline statements''.
+By doing this, our example from above can be translated directly, simply by
+wrapping the \lstinline!C_If! statements up as an ``inline statement block'',
+which are a list of statements disguised as a single expression, where an
+inline statement evaluates to the ``value'' of the last statement in the block.
+
+See TODO (fixup) for more details.
+
 
 \subsubsection{Inline function definitions (lambdas)}
 
@@ -223,7 +355,9 @@ let x = (fun x -> x + 1) 2
 
 \subsection{\texttt{module Fixup}: translation from extended-C AST to valid C AST}
 
-Similar to \lstinline!Translate!, the implementation of \lstinline!Fixup! is done via a recursive tree-walk. Three mutually recursive functions each visit different types of nodes:
+Similar to \lstinline!Translate!, the implementation of \lstinline!Fixup! is
+done via a recursive tree-walk. Three mutually recursive functions each visit
+different types of nodes:
 
 \begin{lstlisting}
 var fixup_let_defs :
@@ -241,17 +375,35 @@ var fixup_rev_statements :
 
 Each fixup function is invoked in the form \lstinline!fixup_foo t accum foo!
 
+We define a single operation which is used during the process of extracting an
+expression from an inline block:
+
+\begin{lstlisting}
+assign_last_value_of_statement
+\end{lstlisting}
+
+TODO
+
 \subsection{\texttt{module Emitcode}: outputting C AST to a file}
 
 \subsection{Driver modification}
 
-Support was added to the \lstinline!ocamlc! driver binary to generate and output C code. A new flag \lstinline!-target-liballocs! was added. After the simplified lambda IR is generated as usual, the presence of this flag will trigger the additional phase of compiling and outputting the C code in addition to running the rest of the compiler pipeline.
+Support was added to the \lstinline!ocamlc! driver binary to generate and
+output C code. A new flag \lstinline!-target-liballocs! was added. After the
+simplified lambda IR is generated as usual, the presence of this flag will
+trigger the additional phase of compiling and outputting the C code in addition
+to running the rest of the compiler pipeline.
 
 \section{Standard library: \texttt{module Pervasives}}
 
 \subsection{C runtime}
 
-The Pervasives module exposes (and internally uses) a large number of external predefined runtime functions (such as \lstinline!caml_sys_exit!), normally provided by the OCaml C runtime library. However, this library makes many assumptions about OCaml's tagged value representation, and is deeply integrated with the garbage collector. Hence new implementations of these functions had to be made.
+The Pervasives module exposes (and internally uses) a large number of external
+predefined runtime functions (such as \lstinline!caml_sys_exit!), normally
+provided by the OCaml C runtime library. However, this library makes many
+assumptions about OCaml's tagged value representation, and is deeply integrated
+with the garbage collector. Hence new implementations of these functions had to
+be made.
 
 I only implemented the functions that were necessary for the subset of stdlib functionality that was required to run my tests and benchmarks.
 
@@ -259,17 +411,34 @@ See appendix TODO for details.
 
 \subsection{Printing to \texttt{stdout} and \texttt{stderr}}
 
-Two sets of C runtime functions had to be implemented in order to support Pervasives functions such as \lstinline!print_int!. Int-to-string formatting and string printing are all delegated to the runtime library.
+Two sets of C runtime functions had to be implemented in order to support
+Pervasives functions such as \lstinline!print_int!. Int-to-string formatting
+and string printing are all delegated to the runtime library.
 
 \section{Inter-module linking}
 
 Each \lstinline!.ml! file in OCaml implicitly defines a toplevel module. The approach I have taken is to represent each such module as an array of values, the order of which is defined by the OCaml compiler.
 
-At the lambda IR all inter-modular value/function accesses have already been lowered to \lstinline!getfield! operations on module objects. For instance, a call to \lstinline!Foo.bar! will already be represented by something like \lstinline!getfield Foo 1!. The ordering of values in modules is determined by the OCaml compiler based on the module's interface (\lstinline!.mli! file if it exists). This scheme implicitly handles data abstraction for us.
+At the lambda IR all inter-modular value/function accesses have already been
+lowered to \lstinline!getfield! operations on module objects. For instance, a
+call to \lstinline!Foo.bar! will already be represented by something like
+\lstinline!getfield Foo 1!. The ordering of values in modules is determined by
+the OCaml compiler based on the module's interface (\lstinline!.mli! file if it
+exists). This scheme implicitly handles data abstraction for us.
 
-A module \lstinline!foo.ml! generates a file \lstinline!foo.c! declaring global variable \lstinline!ocaml_value_t *Foo! (the ``module object'') and global function \lstinline!void Foo__init()! (the ``module constructor''). This module constructor function is idempotent, and after a call to it the module object is guaranteed to contain valid values. Furthermore all global side effects in \lstinline!foo.ml! are also performed when the module is initialised for the first time.
+A module \lstinline!foo.ml! generates a file \lstinline!foo.c! declaring global
+variable \lstinline!ocaml_value_t *Foo! (the ``module object'') and global
+function \lstinline!void Foo__init()! (the ``module constructor''). This module
+constructor function is idempotent, and after a call to it the module object is
+guaranteed to contain valid values. Furthermore all global side effects in
+\lstinline!foo.ml! are also performed when the module is initialised for the
+first time.
 
-Note that \lstinline!Foo! may well depend on other modules, such as \lstinline!Pervasives!. In \lstinline!foo.c! any such dependencies are represented as predeclarations of the module objects and constructors, and calls to constructors at the start of \lstinline!Foo__init!. The skeleton of such a module is shown in the listing below:
+Note that \lstinline!Foo! may well depend on other modules, such as
+\lstinline!Pervasives!. In \lstinline!foo.c! any such dependencies are
+represented as predeclarations of the module objects and constructors, and
+calls to constructors at the start of \lstinline!Foo__init!. The skeleton of
+such a module is shown in the listing below:
 
 \begin{lstlisting}
 #include "liballocs_runtime.h"
@@ -390,8 +559,8 @@ ABI.
   6 & \lstinline!r9!
 \end{tabular}
 
-We shall place \lstinline!env! into the $(\text{\lstinline|n\_args|}+1)$-th argument. Call the
-corresponding register \lstinline!REG_ENV!.
+We shall place \lstinline!env! into the $(\text{\lstinline|n\_args|}+1)$-th
+argument. Call the corresponding register \lstinline!REG_ENV!.
 
 This is the assembly listing for the machine code generated:
 
@@ -432,7 +601,9 @@ However, implementing the direct solution is a little awkward because:
 \end{enumerate}
 
 Luckily, I came up with a neat trick which addresses both issues and remains
-performant. It turns out that we can get away with just pushing \lstinline!env! on top of the stack as follows, before \lstinline!call!ing into \lstinline!f_impl!. The state of the stack on entry to \lstinline!f_impl! is:
+performant. It turns out that we can get away with just pushing \lstinline!env!
+on top of the stack as follows, before \lstinline!call!ing into
+\lstinline!f_impl!. The state of the stack on entry to \lstinline!f_impl! is:
 
 \begin{tabular}{c}
   \lstinline!arg_7!
@@ -494,14 +665,17 @@ must be created:
 
 \subsubsection{Recursive and mutually recursive closures}
 
-Mutually recursive closures share an environment. Hence calls between two mutually recursive closures must pass the same environment pointer to each invocation.
+Mutually recursive closures share an environment. Hence calls between two
+mutually recursive closures must pass the same environment pointer to each
+invocation.
 
 Self-recursive closures are a special case of this.
 
 
 \section{NaN boxing}
 
-In order to support polymorphic comparisons, we need to use a technique to be able to distinguish pointers from immediate ints and doubles.
+In order to support polymorphic comparisons, we need to use a technique to be
+able to distinguish pointers from immediate ints and doubles.
 
 We use a technique called NaN boxing. Inspired by the WebKit JSCore
 
@@ -533,9 +707,13 @@ of these instructions were divined through reverse engineering and code diving.
 
 \subsection{Static exceptions}
 
-Static exceptions are confined to a lexically local scope -- i.e. the raise and the corresponding try are in the same function. The lambda instructions for these are \lstinline!Lstaticraise! and \lstinline!Lstaticcatch!.
+Static exceptions are confined to a lexically local scope -- i.e. the raise and
+the corresponding try are in the same function. The lambda instructions for
+these are \lstinline!Lstaticraise! and \lstinline!Lstaticcatch!.
 
-In this case, we can implement these using the C \lstinline!goto! feature, which allows control flow to jump non-linearly to another point in the same function.
+In this case, we can implement these using the C \lstinline!goto! feature,
+which allows control flow to jump non-linearly to another point in the same
+function.
 
 The structure gets compiled into the following construct:
 
@@ -551,9 +729,17 @@ label_staticcatch_1:;
 
 \subsection{Non-static exceptions}
 
-More generally an exception may unwind through several stack frames, and may be caught in different handlers depending on the dynamic runtime behaviour.
+More generally an exception may unwind through several stack frames, and may be
+caught in different handlers depending on the dynamic runtime behaviour.
 
-C has a mechanism to perform ``non-local'' jumps using the special library calls \lstinline!setjmp! and \lstinline!longjmp!. A call to \lstinline!setjmp! will save the CPU registers at the point the function was called (notably, including the instruction and stack pointers) into a \lstinline!struct jmpbuf! that the user provides. Calling \lstinline!longjmp! will then restore the state of the program, so that execution flow resumes as if the original \lstinline!setjmp! returned for a second time. \lstinline!setjmp! will return non-zero iff it is returning for the second time.
+C has a mechanism to perform ``non-local'' jumps using the special library
+calls \lstinline!setjmp! and \lstinline!longjmp!. A call to \lstinline!setjmp!
+will save the CPU registers at the point the function was called (notably,
+including the instruction and stack pointers) into a \lstinline!struct jmpbuf!
+that the user provides. Calling \lstinline!longjmp! will then restore the state
+of the program, so that execution flow resumes as if the original
+\lstinline!setjmp! returned for a second time. \lstinline!setjmp! will return
+non-zero iff it is returning for the second time.
 
 I use this mechanism to support exception handling. TODO
 
@@ -566,21 +752,32 @@ I use this mechanism to support exception handling. TODO
   }
 \end{lstlisting}
 
-\lstinline!setjmp! allows control flow to ``unwind'' to the last installed exception handler. The value of the exception currently being handled is stored in a global variable known to the compiler, so that exception handlers can pattern match against it. The exception handler is uninstalled (``popped'' off the stack of exception handlers) when:
+\lstinline!setjmp! allows control flow to ``unwind'' to the last installed
+exception handler. The value of the exception currently being handled is stored
+in a global variable known to the compiler, so that exception handlers can
+pattern match against it. The exception handler is uninstalled (``popped'' off
+the stack of exception handlers) when:
 \begin{itemize}
   \item a try block finishes without raising; or
-  \item a handler starts executing. This prevents exceptions raised inside the handler from incorrectly being recursively handled by itself.
+  \item a handler starts executing. This prevents exceptions raised inside the
+      handler from incorrectly being recursively handled by itself.
 \end{itemize}
 
-The memory representation of an exception contains the stringified name of the exception, so that if it is propagated all the way up unhandled, the runtime can print the name of the exception before aborting.
+The memory representation of an exception contains the stringified name of the
+exception, so that if it is propagated all the way up unhandled, the runtime
+can print the name of the exception before aborting.
 
 \subsection{Runtime support}
 
 \subsubsection{Toplevel handler}
 
-If an exception propagates all the way to the top without being handled successfully, the runtime needs to print an error message and abort the program. This is done by installing a root handler in \lstinline!main! before calling into OCaml code.
+If an exception propagates all the way to the top without being handled
+successfully, the runtime needs to print an error message and abort the
+program. This is done by installing a root handler in \lstinline!main! before
+calling into OCaml code.
 
-Assuming that the module being compiled is called \lstinline!Test!, the following is the C \lstinline!main! function:
+Assuming that the module being compiled is called \lstinline!Test!, the
+following is the C \lstinline!main! function:
 
 \begin{lstlisting}
 void Test__init();
@@ -632,6 +829,52 @@ DEFINE_BUILTIN_EXCEPTION(Assert_failure)
 
 \chapter{Evaluation}
 
+\section{Regression testing}
+
+As new features have been implemented in the compiler, I've been writing small
+tests which ensure the correct functionality of that part of the compiler. In
+total 22 separate test files were written, most of which test multiple
+variations in a single file. Each commit to the master branch strives to pass
+all unit tests\footnote{At the end of my project, there were two expected failures: overapplication and submodule function arity inference, as described TODO} -- works in progress were done on a separate branch before
+merging into master when ready.
+
+\section{Benchmarks}
+
+Benchmarks were taken from one of two sources:
+
+\begin{itemize}
+    \item 
+manually written by me as solutions to Project Euler problems;
+\item adapted from the OCamlPro's \lstinline!operf-micro! benchmark suite.
+
+    These are not directly usable due to being dependent on an OCaml-side
+    framework which performs timing and measures GC statistics, features which
+    are not supported by my compiler. However, the core benchmarked code is
+    easily extricated from the framework.
+\end{itemize}
+
+My benchmarking methodology relies on a shell script \lstinline!benchmark.sh!,
+which builds three (TODO: four?) versions of each benchmark:
+
+\begin{itemize}
+    \item \lstinline!ocamlc! upstream bytecode compiler;
+    \item \lstinline!ocamlopt! upstream native compiler (TODO);
+    \item \lstinline!gcc -O2! via my OCaml-to-C compiler;
+    \item \lstinline!clang -O2! via my OCaml-to-C compiler.
+\end{itemize}
+
+
+\subsection{\texttt{fibonacci}}
+
+The \lstinline!fibonacci! benchmark was adapted from the corresponding
+benchmark in \lstinline!operf-micro!.
+
+This simple microbenchmark implements the naive (non-memoising) recursive
+Fibonacci function, and uses it to evaluate the $40$-th Fibonacci number.
+
+The benchmark primarily stress-tests the speed of function calls, as the cost
+of invoking recursive calls dominates the amount of work done inside each call.
+
 %TODO
 
 \chapter{Conclusion}
@@ -648,23 +891,23 @@ DEFINE_BUILTIN_EXCEPTION(Assert_failure)
 % the appendices
 \appendix
 
-\chapter{Latex source}
-
-\section{diss.tex}
-{\scriptsize\verbatiminput{diss.tex}}
-
-\section{proposal.tex}
-{\scriptsize\verbatiminput{proposal.tex}}
-
-\chapter{Makefile}
-
-\section{makefile}\label{makefile}
-%{\scriptsize\verbatiminput{makefile.txt}}
-
-%\section{refs.bib}
-%{\scriptsize\verbatiminput{refs.bib}}
-
-
+%\chapter{Latex source}
+%
+%\section{diss.tex}
+%{\scriptsize\verbatiminput{diss.tex}}
+%
+%\section{proposal.tex}
+%{\scriptsize\verbatiminput{proposal.tex}}
+%
+%\chapter{Makefile}
+%
+%\section{makefile}\label{makefile}
+%%{\scriptsize\verbatiminput{makefile.txt}}
+%
+%%\section{refs.bib}
+%%{\scriptsize\verbatiminput{refs.bib}}
+%
+%
 \chapter{Project Proposal}
 
 %\input{proposal}
