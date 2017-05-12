@@ -914,6 +914,16 @@ area of $10^5$ rectangles.
 
 This makes usage of records and higher order functions.
 
+\subsection{\texttt{list_sort}}
+
+The \lstinline!list_sort! benchmark was written from scratch, to test the
+performance of the unmodified pure-OCaml standard library \lstinline!List.sort!
+routine.
+
+The routine only creates a constant number of closures, but makes heavy use of
+closure invocation and allocates heavily due to the list operations it
+performs.
+
 \subsection{\texttt{p153}}
 
 This benchmark implements a solution to Project Euler problem 153.
