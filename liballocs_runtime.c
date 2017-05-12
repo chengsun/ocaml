@@ -194,15 +194,19 @@ void Test__init();
 
 
 int main() {
+    int ret;
+
     // set up root exception handler
     OCAML_LIBALLOCS_EXN_PUSH();
     if (0 == OCAML_LIBALLOCS_EXN_SETJMP()) {
         Test__init();
-        return 0;
+        ret = 0;
     } else { // catch
         OCAML_LIBALLOCS_EXN_POP();
         fprintf(stderr, "Uncaught OCaml exception: %s\n",
                 (const char *) GET_P(GET_P(ocaml_liballocs_get_exn())[0]));
-        return 1;
+        ret = 1;
     }
+
+    return ret;
 }
