@@ -70,9 +70,20 @@ static const int PAGE_SIZE = 4096;
  *
  * This function creates stubs assuming the calling convention follows the AMD64 System V standard.
  */
+int n_closed = 0;
+int n_closures_invoked = 0;
 generic_funcp_t ocaml_liballocs_close(generic_funcp_t fun, int64_t n_args, ocaml_value_t env) {
+    ++n_closed;
+
     char buf[256];
     char *ptr = buf;
+
+    // mov r11, 0x0123456789abcdef; add dword [r11], 1
+    *ptr++ = 0x49; *ptr++ = 0xbb;
+    intptr_t n_closures_invoked_addr = (intptr_t) &n_closures_invoked;
+    memcpy(ptr, &n_closures_invoked_addr, 8);
+    ptr += 8;
+    *ptr++ = 0x41; *ptr++ = 0x83; *ptr++ = 0x03; *ptr++ = 0x01;
 
     bool stack_passing = false;
     switch (n_args) {
@@ -207,6 +218,8 @@ int main() {
                 (const char *) GET_P(GET_P(ocaml_liballocs_get_exn())[0]));
         ret = 1;
     }
+    printf("Number of closures created: %d\n", n_closed);
+    printf("Number of closures invoked: %d\n", n_closures_invoked);
 
     return ret;
 }
