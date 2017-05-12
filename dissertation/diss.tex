@@ -151,13 +151,11 @@ extent for a comparable purpose.
 
 %TODO
 
-\section{The OCaml compiler -- front-end}
+\section{The OCaml compiler}
 
-The OCaml compiler has several stages:
+The OCaml compiler processes OCaml code in several phases:
 
 TODO diagram
-
-The front-end of the OCaml compiler refers to the 
 
 \subsection{Common types}
 
@@ -237,15 +235,15 @@ Notably this pass does NOT provide:
 I have defined a datatype representing a C-like syntax tree. Not all C features
 are modelled -- only the constructs that my compiler needs to produce.
 
-On the other hand, the tree datatype is slightly more expressive than standard
-ANSI C. These extra features are rewritten into standard C in a later pass, as
-detailed later in section (TODO).
+The tree datatype is slightly more expressive than standard ANSI C. These extra
+features are rewritten into standard C in a later pass, as detailed later in
+section (TODO).
 
 The following datatypes are defined:
 
 \begin{itemize}
   \item
-    \lstinline!C.ctype! represents a C type. Significant constructors include:
+    \lstinline!C.ctype! represents a C type. Notable constructors include:
 
     \begin{itemize}
         \item \lstinline!C_Pointer of C.ctype!
@@ -295,12 +293,10 @@ The following datatypes are defined:
             represents all arithmetic and logical binary operations.
     \end{itemize}
 
-    A variable is represented as 
-
     For instance, the expression \lstinline!foo + 2! is represented as
     \begin{lstlisting}
     C_BinaryOp (C_Variable foo, "+", C_IntLiteral (Int64.of_int 2))\end{lstlisting}%
-    (where \lstinline!foo : Ident.t! is a value representing the name of the
+    (where \lstinline!foo : Ident.t! is the identifier representing the name of the
     \lstinline!foo! variable).
 
 	\item
@@ -313,7 +309,9 @@ The following datatypes are defined:
             \item \lstinline!C_Expression!
             \item etc.
         \end{itemize}
-        Note that statements typically contain one or more expressions, whereas expressions cannot* (TODO) contain statements.
+        Note that statements typically contain one or more expressions, whereas
+        expressions in standard C cannot contain statements. (This is however
+        possible in my AST -- as described below TODO)
 
 	\item
 		\lstinline!C.toplevel! represents a function or global variable declaration/definition at the toplevel.
@@ -322,6 +320,12 @@ The following datatypes are defined:
 Refer to (appendix ? TODO) for the complete datatype definition.
 
 \subsection{\texttt{module Translate}: compilation from lambda IR to C AST}
+
+The implementation of \lstinline!Translate! is done via a recursive tree-walk
+over the \lstinline!lambda! tree. Three mutually recursive functions each
+target different types of C program fragment:
+
+TODO
 
 \subsubsection{Inline statements}
 
@@ -420,7 +424,8 @@ assumptions about OCaml's tagged value representation, and is deeply integrated
 with the garbage collector. Hence new implementations of these functions had to
 be made.
 
-I only implemented the functions that were necessary for the subset of stdlib functionality that was required to run my tests and benchmarks.
+I selectively implemented functions that were necessary for the subset of
+stdlib functionality that was required to run my tests and benchmarks.
 
 See appendix TODO for details.
 
@@ -432,7 +437,9 @@ and string printing are all delegated to the runtime library.
 
 \section{Inter-module linking}
 
-Each \lstinline!.ml! file in OCaml implicitly defines a toplevel module. The approach I have taken is to represent each such module as an array of values, the order of which is defined by the OCaml compiler.
+Each \lstinline!.ml! file in OCaml implicitly defines a toplevel module. The
+approach I have taken is to represent each such module as an array of values,
+the order of which is defined by the OCaml compiler.
 
 At the lambda IR all inter-modular value/function accesses have already been
 lowered to \lstinline!getfield! operations on module objects. For instance, a
@@ -940,7 +947,7 @@ This benchmark performs many list operations and is very allocation-heavy.
 
 \subsection{\texttt{vector\char`_functor}}
 
-The \lstinline!vector_functor! benchmark was adapted from the corresponding
+The \lstinline!vector_functor! microbenchmark was adapted from the corresponding
 benchmark in \lstinline!operf-micro!. It implements 2D and 3D vectors in two
 different styles -- directly and using a functor. It calculates the dot product
 of $10^6$ 2D and 3D vectors.
