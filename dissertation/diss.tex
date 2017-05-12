@@ -875,11 +875,11 @@ manually written by me as solutions to Project Euler problems;
 \end{itemize}
 
 My benchmarking methodology relies on a shell script \lstinline!benchmark.sh!,
-which builds three (TODO: four?) versions of each benchmark:
+which builds four versions of each benchmark:
 
 \begin{itemize}
     \item \lstinline!ocamlc! upstream bytecode compiler;
-    \item \lstinline!ocamlopt! upstream native compiler (TODO);
+    \item \lstinline!ocamlopt! upstream native compiler;
     \item \lstinline!gcc -O2! via my OCaml-to-C compiler;
     \item \lstinline!clang -O2! via my OCaml-to-C compiler.
 \end{itemize}
