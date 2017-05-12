@@ -887,8 +887,8 @@ which builds three (TODO: four?) versions of each benchmark:
 
 \subsection{\texttt{fibonacci}}
 
-The \lstinline!fibonacci! benchmark was adapted from the corresponding
-benchmark in \lstinline!operf-micro!.
+The \lstinline!fibonacci! benchmark was adapted from the \lstinline!fibonnaci!
+[\textit{sic}] benchmark in \lstinline!operf-micro!.
 
 This simple microbenchmark implements the naive (non-memoising) recursive
 Fibonacci function, and uses it to evaluate the $40$-th Fibonacci number.
@@ -896,10 +896,28 @@ Fibonacci function, and uses it to evaluate the $40$-th Fibonacci number.
 The benchmark primarily stress-tests the speed of function calls, as the cost
 of invoking recursive calls dominates the amount of work done inside each call.
 
+\subsection{\texttt{p153}}
+
+\subsection{\texttt{p156}}
+
+\subsection{\texttt{p182}}
+
+\subsection{\texttt{p183}}
+
+\subsection{\texttt{p183}}
+
 %TODO
 
 \chapter{Conclusion}
 
+Limitations:
+
+\begin{itemize}
+  \item No tag in blocks. This means no support for variants
+  \item ``Overapplication'' uncurrying
+  \item Large parts of the standard library are unimplemented. Significantly \lstinline!Array!
+  \item Inter-module function arity is unknown -- cannot partially apply or overapply (TODO: is this true?)
+\end{itemize}
 %TODO
 
 
