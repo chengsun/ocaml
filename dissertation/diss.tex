@@ -912,7 +912,8 @@ This microbenchmark implements a Haskell-style lens (otherwise known as
 ``functional references''), and then uses lenses to generate and calculate the
 area of $10^5$ rectangles.
 
-This makes usage of records and higher order functions.
+This makes usage of records and higher order functions, creating a very large
+number of closures.
 
 \subsection{\texttt{list_sort}}
 
