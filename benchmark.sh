@@ -16,6 +16,6 @@ time /tmp/test.gcc.exe || true
 echo "TESTING CLANG:"
 time /tmp/test.clang.exe || true
 echo "TESTING OCAML (bytecode):"
-time /home/csun/project/ocaml/installed/bin/ocamlrun /tmp/test.ocaml.exe || true
+OCAMLRUNPARAM='s=256M' time /home/csun/project/ocaml/installed/bin/ocamlrun /tmp/test.ocaml.exe || true
 echo "TESTING OCAML (native):"
 time /tmp/test.ocamlnative.exe || true
