@@ -13,6 +13,10 @@
 
 #define STATIC_ASSERT(COND,MSG) typedef char static_assertion_##MSG[(COND)?1:-1]
 
+extern int n_allocations;
+extern int n_allocation_bytes;
+#define malloc(x) (++n_allocations, n_allocation_bytes += (x), malloc(x))
+
 union _ocaml_value_t;
 
 typedef union _ocaml_value_t *generic_datap_t;

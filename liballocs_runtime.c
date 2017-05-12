@@ -70,6 +70,8 @@ static const int PAGE_SIZE = 4096;
  *
  * This function creates stubs assuming the calling convention follows the AMD64 System V standard.
  */
+int n_allocations = 0;
+int n_allocation_bytes = 0;
 int n_closed = 0;
 int n_closures_invoked = 0;
 generic_funcp_t ocaml_liballocs_close(generic_funcp_t fun, int64_t n_args, ocaml_value_t env) {
@@ -218,6 +220,8 @@ int main() {
                 (const char *) GET_P(GET_P(ocaml_liballocs_get_exn())[0]));
         ret = 1;
     }
+    printf("Number of allocations: %d\n", n_allocations);
+    printf("Number of allocation bytes: %d\n", n_allocation_bytes);
     printf("Number of closures created: %d\n", n_closed);
     printf("Number of closures invoked: %d\n", n_closures_invoked);
 
