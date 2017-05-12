@@ -896,17 +896,56 @@ Fibonacci function, and uses it to evaluate the $40$-th Fibonacci number.
 The benchmark primarily stress-tests the speed of function calls, as the cost
 of invoking recursive calls dominates the amount of work done inside each call.
 
+\subsection{\texttt{lens}}
+
+The \lstinline!lens! benchmark was adapted from the corresponding benchmark in
+\lstinline!operf-micro!.
+
+This microbenchmark implements a Haskell-style lens (otherwise known as
+``functional references''), and then uses lenses to generate and calculate the
+area of $10^5$ rectangles.
+
+This makes usage of records and higher order functions.
+
 \subsection{\texttt{p153}}
+
+This benchmark implements a solution to Project Euler problem 153.
+
+This makes usage of exceptions to break out of a recursive loop early.
 
 \subsection{\texttt{p156}}
 
+This benchmark implements a solution to Project Euler problem 153.
+
+This makes heavy use of recursion and imperative-style \lstinline!for! loops.
+
 \subsection{\texttt{p182}}
 
-\subsection{\texttt{p183}}
+This benchmark implements a solution to Project Euler problem 182.
+
+This makes use of a tail-recursive GCD implementation, a counter reference and imperative-style \lstinline!for! loops.
 
 \subsection{\texttt{p183}}
 
-%TODO
+This benchmark implements a solution to Project Euler problem 183.
+
+This makes heavy use of both integer and floating point arithmetic (\lstinline!log!, \lstinline!exp!, floating point division).
+
+\subsection{\texttt{sieve}}
+
+The \lstinline!sieve! benchmark was adapted from the corresponding benchmark in
+\lstinline!operf-micro!. It implements a linked-list sieve of Eratosthenes.
+
+This benchmark performs many list operations and is very allocation-heavy.
+
+\subsection{\texttt{vector\char`_functor}}
+
+The \lstinline!vector_functor! benchmark was adapted from the corresponding
+benchmark in \lstinline!operf-micro!. It implements 2D and 3D vectors in two
+different styles -- directly and using a functor. It calculates the dot product
+of $10^6$ 2D and 3D vectors.
+
+This benchmark allocates many records, and performs floating point operations.
 
 \chapter{Conclusion}
 
