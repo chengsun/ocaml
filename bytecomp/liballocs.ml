@@ -888,7 +888,8 @@ and lambda_to_texpression lam : C.texpression =
           )
       | Pgetglobal id, [] ->
           VarLibrary.ctype varlib id, C_GlobalVariable (Ident.name id)
-      | Pfield i, [lam] ->
+      | Pfield i, [lam]
+      | Pfloatfield i, [lam] ->
           (* TODO: make this use type-specific accessors if possible *)
           C_Boxed,
           C_ArrayIndex (cast (C_Pointer C_Boxed) (lambda_to_texpression lam), C_IntLiteral (Int64.of_int i))
