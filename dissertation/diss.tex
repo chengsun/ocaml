@@ -157,7 +157,7 @@ The OCaml compiler processes OCaml code in several phases:
 
 TODO diagram
 
-\subsection{Common types}
+\subsection{Common types}\label{common-types}
 
 The compiler represents the name of all variables as \lstinline!Ident.t!, which
 is conceptually a tuple of the variable name string and a unique integer. Each
@@ -267,29 +267,36 @@ The following datatypes are defined:
     constructors for this datatype include:
 
     \begin{itemize}
-        \item Variable names. Two types are supported:
-            \begin{itemize}
-                \item \lstinline!C_GlobalVariable of string!
-                \item \lstinline!C_Variable of Ident.t!
-            \end{itemize}
-            TODO explain
+        \item Variable names. Two different kinds are distinguished:
+          \begin{itemize}
+            \item \lstinline!C_Variable of Ident.t! takes an identifier (see
+              \ref{common-types}), and is used for all local variables
+              originating from OCaml code. The variables are formatted suffixed
+              with their unique integer: \lstinline!variablename_1234!.
+            \item \lstinline!C_GlobalVariable of string! takes a string and
+              outputs it verbatim -- there is no integer suffix. The compiler
+              generates these references when it needs to reference internal
+              functions, such as \lstinline!ocaml_liballocs_close! (see
+              \ref{closures-runtime-support}). Cross-references to other
+              modules also use these.
+          \end{itemize}
         \item Data literals of various types:
             \begin{itemize}
                 \item \lstinline!C_IntLiteral of int64!
                 \item \lstinline!C_StringLiteral of string!
-                \item \lstinline!C_FloatLiteral of string! \footnote{Floats are
+                \item \lstinline!C_FloatLiteral of string!\footnote{Floats are
                     always represented in the OCaml compiler as strings, to
                     prevent rounding errors.}
                 \item \lstinline!C_CharLiteral of char!
-                \item \lstinline!C_PointerLiteral of int! \footnote{This
+                \item \lstinline!C_PointerLiteral of int!\footnote{This
                     doesn't take \lstinline!int64! as might be expected, as it
                     is used to represent lambda's \lstinline!Const_pointer of int!,
-                    which is only ever used by the compiler to represent
+                    which seems only to be used by the compiler to represent
                     \lstinline!NULL!.}
             \end{itemize}
         \item \lstinline!C_FunCall of C.expression * C.expression list!
             represents function calls as an expression evaluating to the
-            function to be called, and the list of arguments.
+            function to be called, and the list of arguments. See section \ref{functions}.
         \item \lstinline!C_BinaryOp of string * expression * expression!
             represents all arithmetic and logical binary operations.
     \end{itemize}
@@ -302,12 +309,12 @@ The following datatypes are defined:
 
 	\item
 		\lstinline!C.statement! represents a statement -- language constructs such as:
-        
+
         \begin{itemize}
-            \item \lstinline!if! TODO explain these
-            \item \lstinline!while!
-            \item \lstinline!return!
-            \item \lstinline!C_Expression!
+            \item \lstinline!C_If of expression * statement list * statement list!
+            \item \lstinline!C_While of expression * statement list!
+            \item \lstinline!C_Return of expression option!
+            \item \lstinline!C_Expression of expression!
             \item etc.
         \end{itemize}
         Note that statements typically contain one or more expressions, whereas
@@ -368,10 +375,8 @@ TODO
   \item \lstinline!Lsequence! TODO
   \item \lstinline!Lifthenelse! TODO
   \item \lstinline!Lwhile! TODO
-  \item \lstinline!Lfor! TODO
-  \item \lstinline!Ltrywith! TODO
-  \item \lstinline!Lstaticcatch! TODO
-  \item \lstinline!Lstaticraise! TODO
+  \item \lstinline!Lfor! -- see \ref{for-loops}
+  \item \lstinline!Ltrywith!, \lstinline!Lstaticcatch!, \lstinline!Lstaticraise! -- see \ref{exceptions}
   \item \lstinline!Lstringswitch! TODO
 \end{enumerate}
 
@@ -451,7 +456,9 @@ assign_last_value_of_statement
 
 TODO
 
-\subsection{\texttt{module Emitcode}: outputting C AST to a file}
+\subsection{\texttt{module Emitcode}: outputting C AST to a file}\label{emitcode}
+
+TODO
 
 \subsection{Driver modification}
 
@@ -460,6 +467,50 @@ output C code. A new flag \lstinline!-target-liballocs! was added. After the
 simplified lambda IR is generated as usual, the presence of this flag will
 trigger the additional phase of compiling and outputting the C code in addition
 to running the rest of the compiler pipeline.
+
+\section{Basic constructs}
+
+\subsection{Functions and complete application}\label{functions}
+
+TODO
+
+Partial application and closures are discussed later in section \ref{closures}.
+
+\subsection{Range-based for loops}\label{for-loops}
+
+OCaml's for loops are range-based, coming in two varieties:
+\begin{lstlisting}
+for i = 1 to 10 do ... done
+for i = 10 downto 1 do ... done
+\end{lstlisting}
+
+The range limits are inclusive.
+
+This needs to be translated at some point in into C's more general
+initialisation-condition-update for loop. I chose to reflect OCaml's for loop
+semantics rather than C's with my \lstinline!C.expression!
+constructor, deferring the translation to the \lstinline!Emitcode! stage (see
+\ref{emitcode}.
+
+\lstinline!C_ForInt!
+
+For instance, the first loop from the example above
+compiles to:
+
+\begin{lstlisting}
+for (int64_t i_1203 = 1, _limit_1212 = 10;
+     (i_1203<=_limit_1212);
+     (++i_1203)) {
+  ...
+}
+\end{lstlisting}
+
+There's a slight subtlety in that we need to evaluate the range limits exactly
+once, for correct semantics when evaluating the range incurs side effects.
+Hence the end limit can't be evaluated in the condition part of the C for loop.
+Instead we define the end limit as an additional variable in the initialisation
+step, and test against the variable instead.
+
 
 \section{Standard library: \texttt{module Pervasives}}
 
@@ -482,6 +533,7 @@ See appendix TODO for details.
 Two sets of C runtime functions had to be implemented in order to support
 Pervasives functions such as \lstinline!print_int!. Int-to-string formatting
 and string printing are all delegated to the runtime library.
+
 
 \section{Inter-module linking}
 
@@ -535,6 +587,159 @@ void Foo__init() {
 
 \subsection{\texttt{structured\char`_constant}}
 
+\section{NaN boxing}\label{nan-boxing}
+
+In order to support polymorphic comparisons, we need to use a technique to be
+able to distinguish pointers from immediate ints and doubles.
+
+We use a technique called NaN boxing. Inspired by the WebKit JSCore
+
+\begin{tabular}{c c | c c | c}
+    63..52 & 51..0 & 63..52 & 51..0 & purpose \\
+    \lstinline!fff! & \lstinline!0000000000000! & \lstinline!fff! & \lstinline!1000000000000! & Negative infinity \\
+    \lstinline!fff! & \lstinline!4000000000000! & \lstinline!fff! & \lstinline!5000000000000! & Negative signalling NaN (canonical) \\
+    \lstinline!fff! & \lstinline!8000000000000! & \lstinline!fff! & \lstinline!9000000000000! & Negative quiet NaN (canonical) \\
+    \lstinline!fff! & \lstinline!b000000000000! & \lstinline!fff! & \lstinline!c000000000000! & Integers (50-bit space) \\
+    \lstinline!fff! & \lstinline!effffffffffff! & \lstinline!fff! & \lstinline!fffffffffffff! & Integers (50-bit space) \\
+    \lstinline!fff! & \lstinline!f000000000000! & \lstinline!000! & \lstinline!0000000000000! & Pointers (48-bit space) \\
+    \lstinline!fff! & \lstinline!fffffffffffff! & \lstinline!000! & \lstinline!0ffffffffffff! & Pointers (48-bit space)
+\end{tabular}
+
+\section{Exceptions}\label{exceptions}
+
+OCaml has support for exceptions: a \lstinline!raise Foo! causes the
+exception \lstinline!Foo! to propagate up through stack frames until a
+\lstinline!try _ with Foo -> _! block is found.
+
+Interestingly, exceptions is one of the cases where the lambda IR is more
+complex than the OCaml language. Lambda distinguishes between static (local)
+exceptions, and non-static ones.
+
+Once again, because of the undocumented nature of the lambda IR, the semantics
+of these instructions were divined through reverse engineering and code diving.
+
+\subsection{Static exceptions}
+
+Static exceptions are confined to a lexically local scope -- i.e. the raise and
+the corresponding try are in the same function. The lambda instructions for
+these are \lstinline!Lstaticraise! and \lstinline!Lstaticcatch!.
+
+In this case, we can implement these using the C \lstinline!goto! feature,
+which allows control flow to jump non-linearly to another point in the same
+function.
+
+The structure gets compiled into the following construct:
+
+\begin{lstlisting}
+if (1) {
+    /* body */
+    // goto label_staticcatch_1;
+} else {
+label_staticcatch_1:;
+    /* handler */
+}
+\end{lstlisting}
+
+\subsection{Non-static exceptions}
+
+More generally an exception may unwind through several stack frames, and may be
+caught in different handlers depending on the dynamic runtime behaviour.
+
+C has a mechanism to perform ``non-local'' jumps using the special library
+calls \lstinline!setjmp! and \lstinline!longjmp!. A call to \lstinline!setjmp!
+will save the CPU registers at the point the function was called (notably,
+including the instruction and stack pointers) into a \lstinline!struct jmpbuf!
+that the user provides. Calling \lstinline!longjmp! will then restore the state
+of the program, so that execution flow resumes as if the original
+\lstinline!setjmp! returned for a second time. \lstinline!setjmp! will return
+non-zero iff it is returning for the second time.
+
+I use this mechanism to support exception handling. TODO
+
+\begin{lstlisting}
+  if (setjmp(jmp_buf) == 0) {
+    // first time
+    longjmp(jmp_buf);
+  } else {
+    // second time
+  }
+\end{lstlisting}
+
+\lstinline!setjmp! allows control flow to ``unwind'' to the last installed
+exception handler. The value of the exception currently being handled is stored
+in a global variable known to the compiler, so that exception handlers can
+pattern match against it. The exception handler is uninstalled (``popped'' off
+the stack of exception handlers) when:
+\begin{itemize}
+  \item a try block finishes without raising; or
+  \item a handler starts executing. This prevents exceptions raised inside the
+      handler from incorrectly being recursively handled by itself.
+\end{itemize}
+
+The memory representation of an exception contains the stringified name of the
+exception, so that if it is propagated all the way up unhandled, the runtime
+can print the name of the exception before aborting.
+
+\subsection{Runtime support}
+
+\subsubsection{Toplevel handler}
+
+If an exception propagates all the way to the top without being handled
+successfully, the runtime needs to print an error message and abort the
+program. This is done by installing a root handler in \lstinline!main! before
+calling into OCaml code.
+
+Assuming that the module being compiled is called \lstinline!Test!, the
+following is the C \lstinline!main! function:
+
+\begin{lstlisting}
+void Test__init();
+
+int main() {
+    // set up root exception handler
+    OCAML_LIBALLOCS_EXN_PUSH();
+    if (0 == OCAML_LIBALLOCS_EXN_SETJMP()) {
+        Test__init();
+        return 0;
+    } else { // catch
+        OCAML_LIBALLOCS_EXN_POP();
+        fprintf(stderr, "Uncaught OCaml exception: %s\n",
+                (const char *)
+                  GET_P(GET_P(ocaml_liballocs_get_exn())[0]));
+        return 1;
+    }
+}
+\end{lstlisting}
+
+\subsubsection{Builtin exceptions}
+
+A number of important exceptions are embedded fairly deep in the OCaml
+language, surprisingly at a lower level than even the \lstinline!Pervasives!
+module. OCaml raises some of these exceptions specially for various reasons --
+for example the \lstinline!Division_by_zero! OCaml exception is raised when the
+corresponding FPU exception occurs.
+
+As these exceptions are not defined in the usual way, in OCaml code, we must
+manually declare and instantiate these exceptions in our own C runtime library.
+The list of predefined exceptions can be found in \lstinline!typing/predef.ml!.
+The C preprocessor quote trick allows us to succinctly define the list of
+builtin exceptions statically:
+
+\begin{lstlisting}
+#define _QUOTE(x) #x
+#define QUOTE(x) _QUOTE(x)
+#define DEFINE_BUILTIN_EXCEPTION(name) \
+    ocaml_value_t __##name[2] = { \
+        NEW_P((generic_datap_t) QUOTE(name)), \
+        NEW_I(0) \
+    }; \
+    ocaml_value_t *name = __##name;
+
+DEFINE_BUILTIN_EXCEPTION(Match_failure)
+DEFINE_BUILTIN_EXCEPTION(Assert_failure)
+...
+\end{lstlisting}
+
 \section{Closures}\label{closures}
 
 C allows function references to be stored in variables, in the form of
@@ -567,7 +772,7 @@ runtime. This was pioneered by Breuel (TODO: cite). However, our implementation
 was developed completely from scratch, and many details differ from the
 approach outlined in the paper.
 
-\subsection{Runtime support}
+\subsection{Runtime support}\label{closures-runtime-support}
 
 An internal C function \lstinline{ocaml_liballocs_close(f_impl, n_args, env)}
 was written, which performs the closing operation as previously described.
@@ -749,160 +954,6 @@ invocation.
 Self-recursive closures are a special case of this.
 
 
-\section{NaN boxing}\label{nan-boxing}
-
-In order to support polymorphic comparisons, we need to use a technique to be
-able to distinguish pointers from immediate ints and doubles.
-
-We use a technique called NaN boxing. Inspired by the WebKit JSCore
-
-\begin{tabular}{c c | c c | c}
-    63..52 & 51..0 & 63..52 & 51..0 & purpose \\
-    \lstinline!fff! & \lstinline!0000000000000! & \lstinline!fff! & \lstinline!1000000000000! & Negative infinity \\
-    \lstinline!fff! & \lstinline!4000000000000! & \lstinline!fff! & \lstinline!5000000000000! & Negative signalling NaN (canonical) \\
-    \lstinline!fff! & \lstinline!8000000000000! & \lstinline!fff! & \lstinline!9000000000000! & Negative quiet NaN (canonical) \\
-    \lstinline!fff! & \lstinline!b000000000000! & \lstinline!fff! & \lstinline!c000000000000! & Integers (50-bit space) \\
-    \lstinline!fff! & \lstinline!effffffffffff! & \lstinline!fff! & \lstinline!fffffffffffff! & Integers (50-bit space) \\
-    \lstinline!fff! & \lstinline!f000000000000! & \lstinline!000! & \lstinline!0000000000000! & Pointers (48-bit space) \\
-    \lstinline!fff! & \lstinline!fffffffffffff! & \lstinline!000! & \lstinline!0ffffffffffff! & Pointers (48-bit space)
-\end{tabular}
-
-
-
-\section{Exceptions}
-
-OCaml has support for exceptions: a \lstinline!raise Foo! causes the
-exception \lstinline!Foo! to propagate up through stack frames until a
-\lstinline!try _ with Foo -> _! block is found.
-
-Interestingly, exceptions is one of the cases where the lambda IR is more
-complex than the OCaml language. Lambda distinguishes between static (local)
-exceptions, and non-static ones.
-
-Once again, because of the undocumented nature of the lambda IR, the semantics
-of these instructions were divined through reverse engineering and code diving.
-
-\subsection{Static exceptions}
-
-Static exceptions are confined to a lexically local scope -- i.e. the raise and
-the corresponding try are in the same function. The lambda instructions for
-these are \lstinline!Lstaticraise! and \lstinline!Lstaticcatch!.
-
-In this case, we can implement these using the C \lstinline!goto! feature,
-which allows control flow to jump non-linearly to another point in the same
-function.
-
-The structure gets compiled into the following construct:
-
-\begin{lstlisting}
-if (1) {
-    /* body */
-    // goto label_staticcatch_1;
-} else {
-label_staticcatch_1:;
-    /* handler */
-}
-\end{lstlisting}
-
-\subsection{Non-static exceptions}
-
-More generally an exception may unwind through several stack frames, and may be
-caught in different handlers depending on the dynamic runtime behaviour.
-
-C has a mechanism to perform ``non-local'' jumps using the special library
-calls \lstinline!setjmp! and \lstinline!longjmp!. A call to \lstinline!setjmp!
-will save the CPU registers at the point the function was called (notably,
-including the instruction and stack pointers) into a \lstinline!struct jmpbuf!
-that the user provides. Calling \lstinline!longjmp! will then restore the state
-of the program, so that execution flow resumes as if the original
-\lstinline!setjmp! returned for a second time. \lstinline!setjmp! will return
-non-zero iff it is returning for the second time.
-
-I use this mechanism to support exception handling. TODO
-
-\begin{lstlisting}
-  if (setjmp(jmp_buf) == 0) {
-    // first time
-    longjmp(jmp_buf);
-  } else {
-    // second time
-  }
-\end{lstlisting}
-
-\lstinline!setjmp! allows control flow to ``unwind'' to the last installed
-exception handler. The value of the exception currently being handled is stored
-in a global variable known to the compiler, so that exception handlers can
-pattern match against it. The exception handler is uninstalled (``popped'' off
-the stack of exception handlers) when:
-\begin{itemize}
-  \item a try block finishes without raising; or
-  \item a handler starts executing. This prevents exceptions raised inside the
-      handler from incorrectly being recursively handled by itself.
-\end{itemize}
-
-The memory representation of an exception contains the stringified name of the
-exception, so that if it is propagated all the way up unhandled, the runtime
-can print the name of the exception before aborting.
-
-\subsection{Runtime support}
-
-\subsubsection{Toplevel handler}
-
-If an exception propagates all the way to the top without being handled
-successfully, the runtime needs to print an error message and abort the
-program. This is done by installing a root handler in \lstinline!main! before
-calling into OCaml code.
-
-Assuming that the module being compiled is called \lstinline!Test!, the
-following is the C \lstinline!main! function:
-
-\begin{lstlisting}
-void Test__init();
-
-int main() {
-    // set up root exception handler
-    OCAML_LIBALLOCS_EXN_PUSH();
-    if (0 == OCAML_LIBALLOCS_EXN_SETJMP()) {
-        Test__init();
-        return 0;
-    } else { // catch
-        OCAML_LIBALLOCS_EXN_POP();
-        fprintf(stderr, "Uncaught OCaml exception: %s\n",
-                (const char *)
-                  GET_P(GET_P(ocaml_liballocs_get_exn())[0]));
-        return 1;
-    }
-}
-\end{lstlisting}
-
-\subsubsection{Builtin exceptions}
-
-A number of important exceptions are embedded fairly deep in the OCaml
-language, surprisingly at a lower level than even the \lstinline!Pervasives!
-module. OCaml raises some of these exceptions specially for various reasons --
-for example the \lstinline!Division_by_zero! OCaml exception is raised when the
-corresponding FPU exception occurs.
-
-As these exceptions are not defined in the usual way, in OCaml code, we must
-manually declare and instantiate these exceptions in our own C runtime library.
-The list of predefined exceptions can be found in \lstinline!typing/predef.ml!.
-The C preprocessor quote trick allows us to succinctly define the list of
-builtin exceptions statically:
-
-\begin{lstlisting}
-#define _QUOTE(x) #x
-#define QUOTE(x) _QUOTE(x)
-#define DEFINE_BUILTIN_EXCEPTION(name) \
-    ocaml_value_t __##name[2] = { \
-        NEW_P((generic_datap_t) QUOTE(name)), \
-        NEW_I(0) \
-    }; \
-    ocaml_value_t *name = __##name;
-
-DEFINE_BUILTIN_EXCEPTION(Match_failure)
-DEFINE_BUILTIN_EXCEPTION(Assert_failure)
-...
-\end{lstlisting}
 
 \chapter{Evaluation}
 
