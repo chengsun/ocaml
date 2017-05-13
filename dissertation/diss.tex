@@ -269,14 +269,14 @@ The following datatypes are defined:
     \begin{itemize}
         \item Variable names. Two different kinds are distinguished:
           \begin{itemize}
-            \item \lstinline!C_Variable of Ident.t! takes an identifier (see
+            \item \lstinline!C_Variable of Ident.t! takes an identifier (see section
               \ref{common-types}), and is used for all local variables
               originating from OCaml code. The variables are formatted suffixed
               with their unique integer: \lstinline!variablename_1234!.
             \item \lstinline!C_GlobalVariable of string! takes a string and
               outputs it verbatim -- there is no integer suffix. The compiler
               generates these references when it needs to reference internal
-              functions, such as \lstinline!ocaml_liballocs_close! (see
+              functions, such as \lstinline!ocaml_liballocs_close! (see section
               \ref{closures-runtime-support}). Cross-references to other
               modules also use these.
           \end{itemize}
@@ -319,7 +319,7 @@ The following datatypes are defined:
         \end{itemize}
         Note that statements typically contain one or more expressions, whereas
         expressions in standard C cannot contain statements. (This is however
-        possible in my AST -- as described below \ref{c-inline-statements} and \ref{c-inline-functions}.)
+        possible in my AST -- as described below in sections \ref{c-inline-statements} and \ref{c-inline-functions}.)
 
 	\item
 		\lstinline!C.toplevel! represents a function or global variable declaration/definition at the toplevel.
@@ -375,8 +375,8 @@ TODO
   \item \lstinline!Lsequence! TODO
   \item \lstinline!Lifthenelse! TODO
   \item \lstinline!Lwhile! TODO
-  \item \lstinline!Lfor! -- see \ref{for-loops}
-  \item \lstinline!Ltrywith!, \lstinline!Lstaticcatch!, \lstinline!Lstaticraise! -- see \ref{exceptions}
+  \item \lstinline!Lfor! -- see section \ref{for-loops}
+  \item \lstinline!Ltrywith!, \lstinline!Lstaticcatch!, \lstinline!Lstaticraise! -- see section \ref{exceptions}
   \item \lstinline!Lstringswitch! TODO
 \end{enumerate}
 
@@ -416,7 +416,7 @@ wrapping the \lstinline!C_If! statements up as an ``inline statement block'',
 which are a list of statements disguised as a single expression, where an
 inline statement evaluates to the ``value'' of the last statement in the block.
 
-See \ref{module-fixup} for more details.
+See section \ref{module-fixup} for more details.
 
 
 \subsubsection{Inline function definitions (lambdas)}\label{c-inline-functions}
@@ -490,7 +490,7 @@ This needs to be translated at some point in into C's more general
 initialisation-condition-update for loop. I chose to reflect OCaml's for loop
 semantics rather than C's with my \lstinline!C.expression!
 constructor, deferring the translation to the \lstinline!Emitcode! stage (see
-\ref{emitcode}.
+section \ref{emitcode}).
 
 \lstinline!C_ForInt!
 
@@ -534,6 +534,7 @@ Two sets of C runtime functions had to be implemented in order to support
 Pervasives functions such as \lstinline!print_int!. Int-to-string formatting
 and string printing are all delegated to the runtime library.
 
+TODO
 
 \section{Inter-module linking}
 
@@ -938,12 +939,27 @@ must be created:
 
 \begin{itemize}
     \item \textbf{Function let-binding with non-empty free variable set}:
-        \ldots
-    \item \textbf{Anonymous lambda}:
-        \ldots
+      \begin{lstlisting}
+let make_counter_v1 () =
+  let ctr = ref 0 in
+  let count () = ctr := !ctr + 1; !ctr in
+  count
+      \end{lstlisting}
+    \item \textbf{Anonymous lambda with non-empty free variable set}:
+      \begin{lstlisting}
+let make_counter_v2 () =
+  let ctr = ref 0 in
+  fun () -> (ctr := !ctr + 1; !ctr)
+      \end{lstlisting}
     \item \textbf{Partial application}:
-        \ldots
+      \begin{lstlisting}
+let make_counter_v3 () =
+  let count ctr () = ctr := !ctr + 1; !ctr in
+  count (ref 0)
+      \end{lstlisting}
 \end{itemize}
+
+TODO: explain what we have to do with these
 
 \subsubsection{Recursive and mutually recursive closures}
 
@@ -963,8 +979,11 @@ As new features have been implemented in the compiler, I've been writing small
 tests which ensure the correct functionality of that part of the compiler. In
 total 22 separate test files were written, most of which test multiple
 variations in a single file. Each commit to the master branch strives to pass
-all unit tests\footnote{At the end of my project, there were two expected failures: overapplication and submodule function arity inference, as described in \ref{conclusion}} -- works in progress were done on a separate branch before
-merging into master when ready.
+all unit tests\footnote{At the end of my project, there were two expected
+  failures: overapplication and submodule function arity inference, as
+  described in section \ref{conclusion}}
+-- works in progress were done on a separate branch before merging into master
+when ready.
 
 \section{Benchmarks}
 
