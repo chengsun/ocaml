@@ -198,10 +198,11 @@ records.
 Notably this pass does NOT provide:
 
 \begin{itemize}
-    \item type preservation -- see section TODO
-    \item uncurrying\footnote{Significantly for us this means converting
-        partial applications and ``overapplications'' into complete applications} -- see section TODO
-    \item closure conversion -- see section TODO
+    \item type preservation -- see section \ref{type-information-for-liballocs}
+    \item closure conversion -- see section \ref{closures}
+    \item uncurrying\footnote{Significantly for us this means
+        partial applications and ``overapplications'' are not converted into
+        complete applications} -- see section \ref{closures-compiler-support}
 \end{itemize}
 
 
@@ -237,7 +238,7 @@ are modelled -- only the constructs that my compiler needs to produce.
 
 The tree datatype is slightly more expressive than standard ANSI C. These extra
 features are rewritten into standard C in a later pass, as detailed later in
-section (TODO).
+section \ref{module-fixup}.
 
 The following datatypes are defined:
 
@@ -250,7 +251,7 @@ The following datatypes are defined:
         \item \lstinline!C_Boxed! representing a generic OCaml value -- either
             an immediate int, immediate double or a pointer to a heap-allocated
             object. The representation of this is discussed in detail in
-            section TODO
+            section \ref{nan-boxing}.
         \item \lstinline!C_Int!
         \item \lstinline!C_Double!
         \item \lstinline!C_Struct of Ident.t * (C.ctype * string) list!
@@ -311,13 +312,13 @@ The following datatypes are defined:
         \end{itemize}
         Note that statements typically contain one or more expressions, whereas
         expressions in standard C cannot contain statements. (This is however
-        possible in my AST -- as described below TODO)
+        possible in my AST -- as described below \ref{c-inline-statements} and \ref{c-inline-functions}.)
 
 	\item
 		\lstinline!C.toplevel! represents a function or global variable declaration/definition at the toplevel.
 \end{itemize}
 
-Refer to (appendix ? TODO) for the complete datatype definition.
+Refer to (appendix -- section TODO) for the complete datatype definition.
 
 \subsection{\texttt{module Translate}: compilation from lambda IR to C AST}
 
@@ -374,7 +375,7 @@ TODO
   \item \lstinline!Lstringswitch! TODO
 \end{enumerate}
 
-\subsubsection{Inline statements}
+\subsubsection{Inline statements}\label{c-inline-statements}
 
 The fact that C language makes a distinction between ``statements'' and
 ``expressions'' makes it less expressive than OCaml, as all core language
@@ -410,16 +411,16 @@ wrapping the \lstinline!C_If! statements up as an ``inline statement block'',
 which are a list of statements disguised as a single expression, where an
 inline statement evaluates to the ``value'' of the last statement in the block.
 
-See TODO (fixup) for more details.
+See \ref{module-fixup} for more details.
 
 
-\subsubsection{Inline function definitions (lambdas)}
+\subsubsection{Inline function definitions (lambdas)}\label{c-inline-functions}
 
 \begin{lstlisting}
 let x = (fun x -> x + 1) 2
 \end{lstlisting}
 
-\subsection{\texttt{module Fixup}: translation from extended-C AST to valid C AST}
+\subsection{\texttt{module Fixup}: translation from extended-C AST to valid C AST}\label{module-fixup}
 
 Similar to \lstinline!Translate!, the implementation of \lstinline!Fixup! is
 done via a recursive tree-walk. Three mutually recursive functions each visit
@@ -528,13 +529,13 @@ void Foo__init() {
 }
 \end{lstlisting}
 
-\section{Type information for \texttt{liballocs}}
+\section{Type information for \texttt{liballocs}}\label{type-information-for-liballocs}
 
 \subsection{\texttt{Pmakeblock}}
 
 \subsection{\texttt{structured\char`_constant}}
 
-\section{Closures}
+\section{Closures}\label{closures}
 
 C allows function references to be stored in variables, in the form of
 ``function pointers'' containing the address of the start of the function's
@@ -580,7 +581,8 @@ Then the address of the start of this stub is returned. The stub is described
 in detail below.
 
 Conceptually, the operation can be described as JIT-compiling the following
-snippet of pseudo-C code at runtime: (NB: caveat for $> 5$ arguments TODO)
+snippet of pseudo-C code at runtime. (NB: things are a bit more complicated
+when \lstinline!n_args!${} > 5$ arguments, as described in the sections below.)
 
 \begin{lstlisting}
 ocaml_value_t f_closure(ocaml_value_t arg1,
@@ -718,7 +720,7 @@ Note the deliberate choice of \lstinline{pop rcx} to remove the
 \lstinline{pop r11} or \lstinline{add rsp, 8}). This is a size optimisation --
 the chosen instruction encodes in just one byte.
 
-\subsection{Compiler support}
+\subsection{Compiler support}\label{closures-compiler-support}
 
 As OCaml immediate value representations are immutable, we can simply copy the
 values of each free variable into the environment at the time of closure
@@ -747,7 +749,7 @@ invocation.
 Self-recursive closures are a special case of this.
 
 
-\section{NaN boxing}
+\section{NaN boxing}\label{nan-boxing}
 
 In order to support polymorphic comparisons, we need to use a technique to be
 able to distinguish pointers from immediate ints and doubles.
@@ -910,7 +912,7 @@ As new features have been implemented in the compiler, I've been writing small
 tests which ensure the correct functionality of that part of the compiler. In
 total 22 separate test files were written, most of which test multiple
 variations in a single file. Each commit to the master branch strives to pass
-all unit tests\footnote{At the end of my project, there were two expected failures: overapplication and submodule function arity inference, as described TODO} -- works in progress were done on a separate branch before
+all unit tests\footnote{At the end of my project, there were two expected failures: overapplication and submodule function arity inference, as described in \ref{conclusion}} -- works in progress were done on a separate branch before
 merging into master when ready.
 
 \section{Benchmarks}
@@ -1011,7 +1013,7 @@ of $10^6$ 2D and 3D vectors.
 
 This benchmark allocates many records, and performs floating point operations.
 
-\chapter{Conclusion}
+\chapter{Conclusion}\label{conclusion}
 
 Limitations:
 
