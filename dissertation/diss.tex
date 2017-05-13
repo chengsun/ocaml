@@ -229,6 +229,8 @@ Notably this pass does NOT provide:
     \end{enumerate}
 \end{enumerate}
 
+The stages of my C compiler backend are as follows. TODO
+
 \subsection{\texttt{module C}: the extended C abstract syntax tree datatype}
 
 I have defined a datatype representing a C-like syntax tree. Not all C features
@@ -372,10 +374,10 @@ TODO
   \item \lstinline!Llet!, \lstinline!Lletrec! TODO
   \item \lstinline!Lsequence! TODO
   \item \lstinline!Lifthenelse! TODO
-  \item \lstinline!Lwhile! TODO
+  \item \lstinline!Lwhile! -- see section \ref{while-loops}
   \item \lstinline!Lfor! -- see section \ref{for-loops}
   \item \lstinline!Ltrywith!, \lstinline!Lstaticcatch!, \lstinline!Lstaticraise! -- see section \ref{exceptions}
-  \item \lstinline!Lstringswitch! TODO
+  \item \lstinline!Lstringswitch! -- see section \ref{stringswitch}
 \end{enumerate}
 
 \subsubsection{Inline statements}\label{c-inline-statements}
@@ -466,6 +468,11 @@ simplified lambda IR is generated as usual, the presence of this flag will
 trigger the additional phase of compiling and outputting the C code in addition
 to running the rest of the compiler pipeline.
 
+\section{Build and test scripts}
+
+TODO
+
+
 \section{Basic constructs}
 
 \subsection{Functions and complete application}\label{functions}
@@ -473,6 +480,18 @@ to running the rest of the compiler pipeline.
 TODO
 
 Partial application and closures are discussed later in section \ref{closures}.
+
+\subsection{Mutually recursive functions}\label{mutually-recursive-functions}
+
+TODO
+
+\subsection{Mutually recursive definitions}\label{mutually-recursive-values}
+
+TODO
+
+\subsection{Imperative-style while loops}\label{while-loops}
+
+TODO
 
 \subsection{Range-based for loops}\label{for-loops}
 
@@ -509,6 +528,9 @@ Hence the end limit can't be evaluated in the condition part of the C for loop.
 Instead we define the end limit as an additional variable in the initialisation
 step, and test against the variable instead.
 
+\subsection{String switches}\label{stringswitch}
+
+TODO
 
 \section{Standard library: \texttt{module Pervasives}}
 
@@ -526,7 +548,7 @@ stdlib functionality that was required to run my tests and benchmarks.
 
 See appendix TODO for details.
 
-\subsection{Printing to \texttt{stdout} and \texttt{stderr}}
+\subsection{Printing to \texttt{stdout} and \texttt{stderr}}\label{pervasives-printing}
 
 Two sets of C runtime functions had to be implemented in order to support
 Pervasives functions such as \lstinline!print_int!. Int-to-string formatting
@@ -603,6 +625,8 @@ We use a technique called NaN boxing. Inspired by the WebKit JSCore
     \lstinline!fff! & \lstinline!f000000000000! & \lstinline!000! & \lstinline!0000000000000! & Pointers (48-bit space) \\
     \lstinline!fff! & \lstinline!fffffffffffff! & \lstinline!000! & \lstinline!0ffffffffffff! & Pointers (48-bit space)
 \end{tabular}
+
+\subsection{50-bit integer arithmetic}\label{50-bit-integer}
 
 \section{Exceptions}\label{exceptions}
 
@@ -710,7 +734,7 @@ int main() {
 }
 \end{lstlisting}
 
-\subsubsection{Builtin exceptions}
+\subsubsection{Builtin exceptions}\label{builtin-exceptions}
 
 A number of important exceptions are embedded fairly deep in the OCaml
 language, surprisingly at a lower level than even the \lstinline!Pervasives!
@@ -971,6 +995,10 @@ Self-recursive closures are a special case of this.
 
 \chapter{Evaluation}
 
+\section{Compiling the OCaml \lstinline!List! module}\label{module-list}
+
+TODO
+
 \section{Regression testing}
 
 As new features have been implemented in the compiler, I've been writing small
@@ -982,6 +1010,36 @@ all unit tests\footnote{At the end of my project, there were two expected
   described in section \ref{conclusion}}
 -- works in progress were done on a separate branch before merging into master
 when ready.
+
+A selection of illustrative tests, and the C code produced, is given below.
+
+\begin{enumerate}
+    \item \textbf{\texttt{arithmetic}}: tests integer arithmetic and shift operations, and floating point operations. In particular the sign extension behaviour on 50-bit integers is carefully tested for both arithmetic shift and logical shift operations -- as described in section \ref{50-bit-integer};
+    \item \textbf{\texttt{basic\char`_ops}}: tests compilation and behaviour of nested if statements -- section \ref{module-fixup};
+    \item \textbf{\texttt{basic\char`_types}}: tests basic types: integers, booleans, tuples, lists, reference types
+    \item \textbf{\texttt{closure}}: tests the first two styles of closures (non-empty free variable set) -- as described in section \ref{closures};
+    \item \textbf{\texttt{closure\char`_letrec}}: tests mutually recursive closures;
+    \item \textbf{\texttt{closure\char`_partialapp}}: tests that partial application of a closure itself creates a working closure (contrast with the partialapp test);
+    \item \textbf{\texttt{closure\char`_toplevel}}: ensures that functions with free variables that are globally scoped do not needlessly get transformed into closures;
+    \item \textbf{\texttt{exn}}: tests raising and catching exceptions with and without parameters -- section \ref{exceptions};
+    \item \textbf{\texttt{exn\char`_2}}: ensure that exception handlers are popped correctly;
+    \item \textbf{\texttt{exn\char`_builtin}}: tests builtin exceptions -- section \ref{builtin-exceptions};
+    \item \textbf{\texttt{exn\char`_fatal}}: tests that uncaught exceptions trigger a message and abort the program;
+    \item \textbf{\texttt{for}}: tests range-based for loops, including ranges that are negative-lengthed -- section \ref{for-loops};
+    \item \textbf{\texttt{letrec}}: tests basic mutually recursive functions -- section \ref{mutually-recursive-functions};
+    \item \textbf{\texttt{letrec\char`_value}}: tests the ``mutually recursive values'' OCaml feature -- section \ref{mutually-recursive-values};
+    \item \textbf{\texttt{match}}: tests that pattern matching compiles correctly;
+    \item \textbf{\texttt{partialapp}}: tests the last style of closure (partial application);
+    \item \textbf{\texttt{print}}: tests standard library printing functions -- section \ref{pervasives-printing};
+    \item \textbf{\texttt{stdlib\char`_list}}: tests standard library \lstinline!List! functions -- section \ref{module-list};
+    \item \textbf{\texttt{stringswitch}}: tests pattern matching on strings -- section \ref{stringswitch};
+    \item \textbf{\texttt{while}}: tests imperative-style while loops -- section \ref{while-loops}.
+
+--
+
+    \item \textbf{\texttt{1}}: TODO
+    \item \textbf{\texttt{overapplication}}: TODO
+\end{enumerate}
 
 \section{Benchmarks}
 
@@ -1076,8 +1134,9 @@ This benchmark performs many list operations and is very allocation-heavy.
 
 The \lstinline!vector_functor! microbenchmark was adapted from the corresponding
 benchmark in \lstinline!operf-micro!. It implements 2D and 3D vectors in two
-different styles -- directly and using a functor. It calculates the dot product
-of $10^6$ 2D and 3D vectors.
+different styles -- directly and by using a generic functor. It then uses these
+implementations to create and calculate the dot product of $10^6$ 2D and 3D
+vectors.
 
 This benchmark allocates many records, and performs floating point operations.
 
