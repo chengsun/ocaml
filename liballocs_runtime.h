@@ -309,8 +309,17 @@ external format_float : string -> float -> string = "caml_format_float"
 external int_of_string : string -> int = "caml_int_of_string"
 external float_of_string : string -> float = "caml_float_of_string"
 */
-static ocaml_value_t caml_create_string(ocaml_value_t v) { assert(false && "caml_create_string unimplemented"); }
-static ocaml_value_t caml_blit_string(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3, ocaml_value_t v4, ocaml_value_t v5) { assert(false && "caml_blit_string unimplemented"); }
+static ocaml_value_t caml_create_string(ocaml_value_t v) {
+    return NEW_P(malloc(sizeof(char) * GET_I(v)));
+}
+static ocaml_value_t caml_blit_string(ocaml_value_t v1, ocaml_value_t v2, ocaml_value_t v3, ocaml_value_t v4, ocaml_value_t v5) {
+    char *src = (char *) GET_P(v1);
+    char *dst = (char *) GET_P(v3);
+    src += GET_I(v2);
+    dst += GET_I(v4);
+    memmove(dst, src, GET_I(v5));
+    return NEW_P(NULL);
+}
 static ocaml_value_t caml_format_int(ocaml_value_t v1, ocaml_value_t v2) {
     if (0 == strcmp((const char *) GET_P(v1), "%d")) {
         int size = snprintf(NULL, 0, "%"PRIiPTR, GET_I(v2)) + 1;

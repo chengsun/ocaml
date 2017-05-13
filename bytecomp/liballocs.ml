@@ -346,7 +346,7 @@ module Emitcode = struct
     | C_InitialiserList es -> Printf.sprintf "{%s}" (map_intersperse_concat expression_to_string ", " es)
     | C_Cast (ty,e) -> Printf.sprintf "((%s)%s)" (ctype_to_string ty) (expression_to_string e)
     | C_UnaryOp (op,x) -> "(" ^ op ^ (expression_to_string x) ^ ")"
-    | C_BinaryOp (op,x,y) -> "(" ^ (expression_to_string x) ^ op ^ (expression_to_string y) ^ ")"
+    | C_BinaryOp (op,x,y) -> Printf.sprintf "(%s %s %s)" (expression_to_string x) op (expression_to_string y)
     | C_FunCall (e_id,es) ->
         (expression_to_string e_id) ^ "(" ^ (map_intersperse_concat expression_to_string ", " es) ^ ")"
     | C_Allocate (ctype, n, tyinfo) -> begin
