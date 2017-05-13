@@ -164,7 +164,7 @@ is conceptually a tuple of the variable name string and a unique integer. Each
 let binding is given its own unique \lstinline!Ident.t! -- once the frontend
 has resolved variables using OCaml's scoping and shadowing rules, the rest of
 the compiler has the guarantee of globally unique\footnote{Up to module
-boundary -- at the \lstinline!lambda! level intermodule variable references
+boundary -- at the \lstinline!Lambda! level intermodule variable references
 have already boiled down to record field accesses.} identifier names.
 
 A \lstinline!type_expr! represents the OCaml type of a particular expression.
@@ -186,7 +186,7 @@ this type.
 
 \subsection{\texttt{Lambda} IR}
 
-For our purposes, \lstinline!lambda! is the most important representation in
+For our purposes, \lstinline!Lambda! is the most important representation in
 the OCaml compiler, as it is the starting point for our compiler. This
 Intermediate Representation (IR) is based on a heavily augmented lambda calculus.
 
@@ -322,7 +322,7 @@ Refer to (appendix ? TODO) for the complete datatype definition.
 \subsection{\texttt{module Translate}: compilation from lambda IR to C AST}
 
 The implementation of \lstinline!Translate! is done via a recursive tree-walk
-over the \lstinline!lambda! tree. Three mutually recursive functions each
+over the \lstinline!Lambda! tree. Three mutually recursive functions each
 target different types of C program fragment:
 
 TODO
@@ -330,9 +330,49 @@ TODO
 Unfortunately the lambda IR is undocumented, so the semantics
 of these instructions were divined through reverse engineering and code diving.
 
+\subsubsection{Primitive operations}
+
 \begin{enumerate}
+  \item \lstinline!Pidentity! TODO
+  \item \lstinline!Pignore! TODO
+  \item \lstinline!Popaque! TODO
+  \item \lstinline!Pdirapply! and \lstinline!Prevapply! TODO
+  \item \lstinline!Pgetglobal! TODO
+  \item \lstinline!Pfield! and \lstinline!Pfloatfield! TODO
+  \item \lstinline!Psetfield! TODO
+  \item \lstinline!Pmakeblock! TODO
+  \item various unary and binary operations TODO
+  \item \lstinline!Pccall! TODO
+  \item \lstinline!Praise! TODO
+  \item \lstinline!Pstringlength! TODO
+  \item \lstinline!Pstringrefs! TODO
+\end{enumerate}
+
+\subsubsection{Structured constants}
+
+TODO
+
+\subsubsection{Events}
+
+\subsubsection{Other \texttt{Lambda} operations}
+
+\begin{enumerate}
+  \item \lstinline!Lvar! TODO
+  \item \lstinline!Lfunction! TODO
+  \item \lstinline!Lapply! TODO
+
+    ---
+
+  \item \lstinline!Llet!, \lstinline!Lletrec! TODO
+  \item \lstinline!Lsequence! TODO
+  \item \lstinline!Lifthenelse! TODO
+  \item \lstinline!Lwhile! TODO
+  \item \lstinline!Lfor! TODO
+  \item \lstinline!Ltrywith! TODO
+  \item \lstinline!Lstaticcatch! TODO
+  \item \lstinline!Lstaticraise! TODO
   \item \lstinline!Lstringswitch! TODO
-\end{enumerate}<++>
+\end{enumerate}
 
 \subsubsection{Inline statements}
 
@@ -878,9 +918,8 @@ merging into master when ready.
 Benchmarks were taken from one of two sources:
 
 \begin{itemize}
-    \item 
-manually written by me as solutions to Project Euler problems;
-\item adapted from the OCamlPro's \lstinline!operf-micro! benchmark suite.
+    \item manually written by me as solutions to Project Euler problems;
+    \item adapted from the OCamlPro's \lstinline!operf-micro! benchmark suite.
 
     These are not directly usable due to being dependent on an OCaml-side
     framework which performs timing and measures GC statistics, features which
@@ -922,7 +961,7 @@ area of $10^5$ rectangles.
 This makes usage of records and higher order functions, creating a very large
 number of closures.
 
-\subsection{\texttt{list_sort}}
+\subsection{\texttt{list\char`_sort}}
 
 The \lstinline!list_sort! benchmark was written from scratch, to test the
 performance of the unmodified pure-OCaml standard library \lstinline!List.sort!
