@@ -66,7 +66,7 @@ echo "TESTING OCAML (native):"
 t=$(/bin/time -f '%e' /tmp/test.ocamlnative.exe 3>&2 2>&1 1>&3-)
 echo "$name,$gitref,ocamlopt,$t,$?" >> /home/csun/project/ocaml/results
 
-export OCAMLRUNPARAM='space_overhead=1000000,max_overhead=1000000'
+export OCAMLRUNPARAM='s=4096M,space_overhead=1000000,max_overhead=1000000'
 
 echo "TESTING OCAML (bytecode no GC):"
 t=$(/bin/time -f '%e' /home/csun/project/ocaml/installed/bin/ocamlrun /tmp/test.ocaml.exe 3>&2 2>&1 1>&3-)
