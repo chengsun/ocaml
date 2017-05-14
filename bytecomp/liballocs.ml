@@ -732,7 +732,11 @@ and tclosurify name_hint env_mapping ret_type typedparams cbody =
 
   let n_args = List.length typedparams in
   let typedparams_fun =
-    typedparams @ (if n_args <= 5 then [env_type, env_id] else [C_Pointer C_Void, Ident.create "unused" ; env_type, env_id])
+    if n_args <= 5 then
+      typedparams @ [env_type, env_id]
+    else
+      let typedparams6fst, typedparams6snd = list_splitat 6 typedparams in
+      typedparams6fst @ [env_type, env_id ; C_Pointer C_Void, Ident.create "unused"] @ typedparams6snd
   in
   VarLibrary.set_ctype varlib (C_FunPointer (ret_type, List.map fst typedparams_fun)) id_fun;
 
