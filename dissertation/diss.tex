@@ -267,19 +267,6 @@ The following datatypes are defined:
     constructors for this datatype include:
 
     \begin{itemize}
-        \item Variable names. Two different kinds are distinguished:
-          \begin{itemize}
-            \item \lstinline!C_Variable of Ident.t! takes an identifier (see section
-              \ref{common-types}), and is used for all local variables
-              originating from OCaml code. The variables are formatted suffixed
-              with their unique integer: \lstinline!variablename_1234!.
-            \item \lstinline!C_GlobalVariable of string! takes a string and
-              outputs it verbatim -- there is no integer suffix. The compiler
-              generates these references when it needs to reference internal
-              functions, such as \lstinline!ocaml_liballocs_close! (see section
-              \ref{closures-runtime-support}). Cross-references to other
-              modules also use these.
-          \end{itemize}
         \item Data literals of various types:
             \begin{itemize}
                 \item \lstinline!C_IntLiteral of int64!
@@ -294,6 +281,19 @@ The following datatypes are defined:
                     which seems only to be used by the compiler to represent
                     \lstinline!NULL!.}
             \end{itemize}
+        \item Variables. Two different kinds are distinguished:
+          \begin{itemize}
+            \item \lstinline!C_Variable of Ident.t! takes an identifier (see section
+              \ref{common-types}), and is used for all local variables
+              originating from OCaml code. The variables are formatted suffixed
+              with their unique integer: \lstinline!variablename_1234!.
+            \item \lstinline!C_GlobalVariable of string! takes a string and
+              outputs it verbatim -- there is no integer suffix. The compiler
+              generates these references when it needs to reference internal
+              functions, such as \lstinline!ocaml_liballocs_close! (see section
+              \ref{closures-runtime-support}). Cross-references to other
+              modules also use these.
+          \end{itemize}
         \item \lstinline!C_FunCall of C.expression * C.expression list!
             represents function calls as an expression evaluating to the
             function to be called, and the list of arguments. See section \ref{functions}.
@@ -376,16 +376,16 @@ TODO
   \item \lstinline!Lifthenelse! TODO
   \item \lstinline!Lwhile! -- see section \ref{while-loops}
   \item \lstinline!Lfor! -- see section \ref{for-loops}
-  \item \lstinline!Ltrywith!, \lstinline!Lstaticcatch!, \lstinline!Lstaticraise! -- see section \ref{exceptions}
   \item \lstinline!Lstringswitch! -- see section \ref{stringswitch}
+  \item \lstinline!Ltrywith!, \lstinline!Lstaticcatch!, \lstinline!Lstaticraise! -- see section \ref{exceptions}
 \end{enumerate}
 
 \subsubsection{Inline statements}\label{c-inline-statements}
 
 The fact that C language makes a distinction between ``statements'' and
 ``expressions'' makes it less expressive than OCaml, as all core language
-features in OCaml are expressions. In particular, consider the translation of
-the following OCaml code:
+features in OCaml can be used as expressions. For instance, consider the
+translation of the following OCaml code:
 
 \begin{lstlisting}
 let x = if foo then (if bar then 1 else 2) else 3
@@ -606,7 +606,11 @@ void Foo__init() {
 
 \subsection{\texttt{Pmakeblock}}
 
+TODO
+
 \subsection{\texttt{structured\char`_constant}}
+
+TODO
 
 \section{NaN boxing}\label{nan-boxing}
 
@@ -627,6 +631,10 @@ We use a technique called NaN boxing. Inspired by the WebKit JSCore
 \end{tabular}
 
 \subsection{50-bit integer arithmetic}\label{50-bit-integer}
+
+NaN boxing means that our integers are 50-bit sized. This is OK, because the size of the standard unboxed integer in OCaml is deliberately left unspecified -- the upstream compiler uses either 31-bit or 63-bit integers depending on the platform.
+
+Interestingly, using a non-word-sized integer
 
 \section{Exceptions}\label{exceptions}
 
@@ -886,13 +894,13 @@ When \lstinline!n_args! $> 5$, \lstinline!env! needs to get passed in on the
 stack instead.
 
 \begin{tabular}{c}
+  return address to caller
+  \\ \hline\hline
   \lstinline!arg_7!
   \\ \hline
   \vdots
   \\ \hline
   \lstinline!arg_n!
-  \\ \hline\hline
-  return address to caller
 \end{tabular}
 
 However, implementing the direct solution is a little awkward because:
@@ -911,17 +919,17 @@ on top of the stack as follows, before \lstinline!call!ing into
 \lstinline!f_impl!. The state of the stack on entry to \lstinline!f_impl! is:
 
 \begin{tabular}{c}
+  return address to stub
+  \\ \hline\hline
+  \lstinline!env!
+  \\ \hline
+  return address to caller
+  \\ \hline
   \lstinline!arg_7!
   \\ \hline
   \vdots
   \\ \hline
   \lstinline!arg_n!
-  \\ \hline
-  return address to caller
-  \\ \hline
-  \lstinline!env!
-  \\ \hline\hline
-  return address to stub
 \end{tabular}
 
 By treating the return address to caller as an extra (unused) argument to
@@ -929,8 +937,18 @@ By treating the return address to caller as an extra (unused) argument to
 (\lstinline{n_args}${}+2$)th argument.
 
 This trick works because our compiler has control over the function signature
-of \lstinline{f} -- in this case it'll just insert an additional
-\lstinline{void *ignored} argument before \lstinline{env}.
+of \lstinline{f} -- in this case it'll just generate the following signature:
+
+\begin{lstlisting}
+ocaml_value_t f(ocaml_value_t arg_1,
+                ...
+                ocaml_value_t arg_6,
+                ocaml_value_t *env,
+                void *unused,
+                ocaml_value_t arg_7,
+                ...
+                ocaml_value_t arg_n);
+\end{lstlisting}
 
 Now the machine code stub looks like this:
 
@@ -1043,32 +1061,57 @@ A selection of illustrative tests, and the C code produced, is given below.
 
 \section{Benchmarks}
 
-Benchmarks were taken from one of two sources:
-
-\begin{itemize}
-    \item manually written by me as solutions to Project Euler problems;
-    \item adapted from the OCamlPro's \lstinline!operf-micro! benchmark suite.
-
-    These are not directly usable due to being dependent on an OCaml-side
-    framework which performs timing and measures GC statistics, features which
-    are not supported by my compiler. However, the core benchmarked code is
-    easily extricated from the framework.
-\end{itemize}
-
 My benchmarking methodology relies on a shell script \lstinline!benchmark.sh!,
-which builds four versions of each benchmark:
+which runs twelve versions of each benchmark:
 
 \begin{itemize}
-    \item \lstinline!ocamlc! upstream bytecode compiler;
-    \item \lstinline!ocamlopt! upstream native compiler;
-    \item \lstinline!gcc -O2! via my OCaml-to-C compiler;
-    \item \lstinline!clang -O2! via my OCaml-to-C compiler.
+    \item Bytecode generated by the upstream \lstinline!ocamlc! bytecode compiler. These are run with \lstinline!ocamlrun! (the upstream optimised bytecode interpreter), with default GC settings, and disabled GC settings;
+    \item Native code generated by the upstream \lstinline!ocamlopt! native compiler, with default GC settings, and disabled GC settings;
+    \item Native code generated by \lstinline!gcc! via my OCaml-to-C compiler, with each of four optimisation levels (\lstinline!-O0!, \lstinline!-O1!, \lstinline!-O2!, \lstinline!-O3!);
+    \item Native code generated by \lstinline!clang! via my OCaml-to-C compiler, with each of four optimisation levels.
 \end{itemize}
 
 
-\subsection{\texttt{fibonacci}}
+My benchmarks fall into one of three categories.
 
-The \lstinline!fibonacci! benchmark was adapted from the \lstinline!fibonnaci!
+\subsection{Microbenchmarks}
+Microbenchmarks written by me. These test particular aspects of the
+performance of the generated code.
+
+\begin{enumerate}
+  \item
+    The \textbf{\texttt{closure\char`_create\char`_<n>}} family of benchmarks test the performance of
+    creating closures which take $n$ arguments and capture 1 environment value.
+
+  \item
+    The \textbf{\texttt{closure\char`_invoke\char`_<n>}} family of benchmarks the performance of
+    invoking closures which take $n$ arguments and capture 1 environment value.
+
+  \item
+    The \textbf{\texttt{closure\char`_capture\char`_<n>}} family of benchmarks the performance
+    of invoking closures which take 1 argument and capture $n$ variables from their environment.
+
+  \item
+
+  The \textbf{\texttt{list\char`_sort}} benchmark was written from scratch, to test the
+  performance of the unmodified pure-OCaml standard library \lstinline!List.sort!
+  routine (see section \ref{module-list}).
+
+  The routine only creates a constant number of closures, but makes heavy use of
+  closure invocation and allocates heavily due to the list operations it
+  performs.
+\end{enumerate}
+
+\subsection{\texttt{operf-micro} benchmark suite}
+These are various sized benchmarks adapted from the OCamlPro's
+      \lstinline!operf-micro! benchmark suite. These needed adapting before
+      they could be used, due to being dependent on an OCaml-side framework
+      which performs timing and measures GC statistics, features which are not
+      supported by my compiler.
+\begin{enumerate}
+
+  \item
+    The \textbf{\texttt{fibonacci}} benchmark was adapted from the \lstinline!fibonnaci!
 [\textit{sic}] benchmark in \lstinline!operf-micro!.
 
 This simple microbenchmark implements the naive (non-memoising) recursive
@@ -1077,68 +1120,56 @@ Fibonacci function, and uses it to evaluate the $40$-th Fibonacci number.
 The benchmark primarily stress-tests the speed of function calls, as the cost
 of invoking recursive calls dominates the amount of work done inside each call.
 
-\subsection{\texttt{lens}}
+\item
 
-The \lstinline!lens! benchmark was adapted from the corresponding benchmark in
-\lstinline!operf-micro!.
-
-This microbenchmark implements a Haskell-style lens (otherwise known as
-``functional references''), and then uses lenses to generate and calculate the
-area of $10^5$ rectangles.
+  The \textbf{\texttt{lens}} benchmark implements a Haskell-style lens (otherwise known as
+functional references), and then uses lenses to operate on a
+\lstinline!rectangle! record type.
 
 This makes usage of records and higher order functions, creating a very large
 number of closures.
 
-\subsection{\texttt{list\char`_sort}}
+\item
 
-The \lstinline!list_sort! benchmark was written from scratch, to test the
-performance of the unmodified pure-OCaml standard library \lstinline!List.sort!
-routine.
-
-The routine only creates a constant number of closures, but makes heavy use of
-closure invocation and allocates heavily due to the list operations it
-performs.
-
-\subsection{\texttt{p153}}
-
-This benchmark implements a solution to Project Euler problem 153.
-
-This makes usage of exceptions to break out of a recursive loop early.
-
-\subsection{\texttt{p156}}
-
-This benchmark implements a solution to Project Euler problem 153.
-
-This makes heavy use of recursion and imperative-style \lstinline!for! loops.
-
-\subsection{\texttt{p182}}
-
-This benchmark implements a solution to Project Euler problem 182.
-
-This makes use of a tail-recursive GCD implementation, a counter reference and imperative-style \lstinline!for! loops.
-
-\subsection{\texttt{p183}}
-
-This benchmark implements a solution to Project Euler problem 183.
-
-This makes heavy use of both integer and floating point arithmetic (\lstinline!log!, \lstinline!exp!, floating point division).
-
-\subsection{\texttt{sieve}}
-
-The \lstinline!sieve! benchmark was adapted from the corresponding benchmark in
-\lstinline!operf-micro!. It implements a linked-list sieve of Eratosthenes.
+  The \textbf{\texttt{sieve}} benchmark implements a linked-list sieve of Eratosthenes.
 
 This benchmark performs many list operations and is very allocation-heavy.
 
-\subsection{\texttt{vector\char`_functor}}
+\item
 
-The \lstinline!vector_functor! microbenchmark was adapted from the corresponding
-benchmark in \lstinline!operf-micro!. It implements 2D and 3D vectors in two
+  The \textbf{\texttt{vector\char`_functor}} benchmark implements 2D and 3D vectors in two
 different styles -- directly and by using a generic functor. It then uses these
 implementations to create and calculate the dot product of $10^6$ 2D and 3D
 vectors.
 
 This benchmark allocates many records, and performs floating point operations.
+\end{enumerate}
+
+\subsection{Macrobenchmarks}
+These are larger benchmarks written by me, as solutions to Project Euler problems.
+
+\begin{enumerate}
+\item
+
+The \textbf{\texttt{p153}} benchmark implements a solution to Project Euler problem 153.
+
+This makes usage of exceptions to break out of a recursive loop early.
+
+\item
+  The \textbf{\texttt{p156}} benchmark implements a solution to Project Euler problem 156.
+
+This makes heavy use of recursion and imperative-style \lstinline!for! loops.
+
+\item
+  The \textbf{\texttt{p182}} benchmark implements a solution to Project Euler problem 182.
+
+This makes use of a tail-recursive GCD implementation, a counter reference and imperative-style \lstinline!for! loops.
+
+\item
+  The \textbf{\texttt{p183}} benchmark implements a solution to Project Euler problem 183.
+
+This makes heavy use of both integer and floating point arithmetic (\lstinline!log!, \lstinline!exp!, floating point division).
+\end{enumerate}
 
 \chapter{Conclusion}\label{conclusion}
 
