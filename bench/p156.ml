@@ -41,8 +41,10 @@ let rec count d start startd startacc power =
 
 let () =
     let final_result = ref 0 in
-    for d = 1 to 9 do
-        let (_, result) = count d 0 0 0 11 in
-        final_result := !final_result + result
+    for i = 1 to 100 do
+      for d = 1 to 9 do
+          let (_, result) = count d 0 0 0 11 in
+          final_result := !final_result + result
+      done
     done;
     print_int !final_result; print_newline ()

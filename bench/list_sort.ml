@@ -18,6 +18,6 @@ let rec assert_sorted = function
 ;;
 
 let _ =
-  let orig = random_list 100_000 in
+  let orig = random_list 1_000_000 in
   let sorted = List.sort (-) orig in
   assert_sorted sorted

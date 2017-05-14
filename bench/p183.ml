@@ -21,7 +21,9 @@ let d n =
 
 let () =
     let ans = ref 0 in
-    for n = 5 to 10000 do
-        ans := !ans + d n
+    for i = 1 to 100 do
+      for n = 5 to 10000 do
+          ans := !ans + d n
+      done
     done;
     print_int !ans; print_newline ()

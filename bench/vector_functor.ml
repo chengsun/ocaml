@@ -112,7 +112,7 @@ end
 let (=!=) (a: float) b = if a = b then () else failwith ""
 
 let _ =
-  for i = 0 to 1_000_000; do
+  for i = 0 to 10_000_000; do
     let ans2 = (float i) *. (float i) +. (float (i+1)) *. (float (i+1)) in
     let x2 = { VR2.x = float i; VR2.y = float (i + 1); ph = () } in
     let y2 = (float i, float (i + 1)) in

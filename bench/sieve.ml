@@ -43,7 +43,8 @@ let sieve max =
     filter_again (interval 2 max)
 
 let () =
-  let primes = sieve 50_000 in
-  let prime_sum = List.fold_right (fun x y -> x + y) primes 0 in
-  print_int prime_sum; print_newline ();
-  assert (prime_sum = 121013308)
+  for i = 1 to 100 do
+    let primes = sieve 50_000 in
+    let prime_sum = List.fold_right (fun x y -> x + y) primes 0 in
+    assert (prime_sum = 121013308)
+  done

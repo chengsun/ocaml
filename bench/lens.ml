@@ -153,6 +153,6 @@ let check_rect_area n =
   else failwith "rect_area"
 
 let _ =
-  for i = 1 to 100_000 do
+  for i = 1 to 1_000_000 do
     check_rect_area i
   done
