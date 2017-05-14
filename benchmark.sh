@@ -2,11 +2,19 @@
 
 set -e
 
-name=$1
+./build_liballocs.sh
+
+if [ -f $1 ]; then
+    path=$1
+    name=$(basename -s .ml $1)
+else
+    name=$1
+    path=./bench/${name}.ml
+fi
 gitref=$(git rev-parse --short HEAD)
 
 echo ">>> Benchmarking ${name}..."
-cp ./bench/${name}.ml /tmp/test.ml
+cp "$path" /tmp/test.ml
 OCAMLRUNPARAM=b ./ocamlc -target-liballocs -o /tmp/test.ocaml.exe -g /tmp/test.ml
 ocamlopt -o /tmp/test.ocamlnative.exe -g /tmp/test.ml
 gcc -O0 -std=c99 -Wall -Wno-unused -I. -o /tmp/test.gcc-O0.exe /tmp/test.c ./stdlib_liballocs/*.c ./liballocs_runtime.c -lm
