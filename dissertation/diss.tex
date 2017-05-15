@@ -151,6 +151,8 @@ extent for a comparable purpose.
 
 \section{The OCaml compiler}
 
+The vast majority of my code will be written as part of the OCaml compiler. The compiler is itself written in OCaml, and is a large and complex code base developed over the course of over 20 years, consisting of 197k lines of OCaml and 42k lines of C.\footnote{As counted by the \lstinline!cloc! tool.}
+
 The OCaml compiler processes OCaml code in several phases:
 
 TODO diagram
@@ -323,6 +325,7 @@ The following datatypes are defined:
 
 	\item
 		\lstinline!C.toplevel! represents a function or global variable declaration/definition at the toplevel.
+        TODO
 \end{itemize}
 
 Refer to (appendix -- section TODO) for the complete datatype definition.
@@ -335,8 +338,10 @@ target different types of C program fragment:
 
 TODO
 
-Unfortunately the lambda IR is undocumented, so the semantics
+Unfortunately the lambda IR is not documented anywhere, so the semantics
 of these instructions were divined through reverse engineering and code diving.
+OCaml's expressive type system often hinted at the semantics of various
+parts of the code.
 
 \subsubsection{Primitive operations}
 
@@ -392,18 +397,18 @@ let x = if foo then (if bar then 1 else 2) else 3
 \end{lstlisting}
 
 Clearly a direct translation of this wouldn't be possible, as \lstinline!if!
-statements cannot be used as expressions in C.\footnote{
-    The ternary operator \lstinline!?:! exists in C as an expression analogue
-    of \lstinline!if!.  However, it isn't used by my compiler for two reasons.
-    Firstly in the interests of readability -- nested ternary operators get
-    hard to read very quickly. The second reason is that debuggability of if
-    statements would be hampered by the fact that debuggers tend not to be able
-    to single-step easily from the condition to the body.
+statements cannot be used as expressions in C. The ternary operator
+\lstinline!?:! exists in C as an expression analogue of \lstinline!if!.
+However, it isn't used by my compiler for two reasons.  Firstly in the
+interests of readability -- nested ternary operators get hard to read very
+quickly. The second reason is that debuggability of if statements would be
+hampered by the fact that debuggers tend not to be able to single-step easily
+from the condition to the body.
 
-    Even if the ternary operator were used, there are other statements that
-    cannot be made into expressions as easily. An example is the let-statement,
-    which translates to variable declarations in C. Hence, a solution to this
-    general problem would still be required.}
+Even if the ternary operator were used, there are other statements that
+cannot be made into expressions as easily. An example is the let-statement,
+which translates to variable declarations in C. Hence, a solution to this
+general problem would still be required.
 
 The way that we handle this is by extending our \lstinline!C.expression! so
 that statements can become expressions.  We add a new constructor
@@ -1013,9 +1018,24 @@ Self-recursive closures are a special case of this.
 
 \chapter{Evaluation}
 
-\section{Compiling the OCaml \lstinline!List! module}\label{module-list}
+\section{Compiling the OCaml \texttt{List} module}\label{module-list}
 
-TODO
+As a demonstration of the capabilities of my OCaml compiler, I am able to
+directly compile the \lstinline!List! module from the upstream standard
+library, with no modifications.
+
+Although many of the functions in the module are very basic (e.g.
+\lstinline!hd!), others serve as good demonstrations of recursion, first order
+functions and closures, such as \lstinline!filter!, \lstinline!fold_left!. By
+far the most complicated function in the module is \lstinline!sort!, which
+implements an optimised mergesort.
+
+Compiling the \lstinline!List! module is not just for demonstration purposes,
+however. It is a required step in building the compiler, as many benchmarks
+rely on this module. The way that \lstinline!List! support is provided to user
+code is during tthe linking stage: the user's generated C code is linked
+against the generated C code of the \lstinline!Pervasives! and \lstinline!List!
+modules.
 
 \section{Regression testing}
 
@@ -1032,26 +1052,52 @@ when ready.
 A selection of illustrative tests, and the C code produced, is given below.
 
 \begin{enumerate}
-    \item \textbf{\texttt{arithmetic}}: tests integer arithmetic and shift operations, and floating point operations. In particular the sign extension behaviour on 50-bit integers is carefully tested for both arithmetic shift and logical shift operations -- as described in section \ref{50-bit-integer};
-    \item \textbf{\texttt{basic\char`_ops}}: tests compilation and behaviour of nested if statements -- section \ref{module-fixup};
-    \item \textbf{\texttt{basic\char`_types}}: tests basic types: integers, booleans, tuples, lists, reference types
-    \item \textbf{\texttt{closure}}: tests the first two styles of closures (non-empty free variable set) -- as described in section \ref{closures};
-    \item \textbf{\texttt{closure\char`_letrec}}: tests mutually recursive closures;
-    \item \textbf{\texttt{closure\char`_partialapp}}: tests that partial application of a closure itself creates a working closure (contrast with the partialapp test);
-    \item \textbf{\texttt{closure\char`_toplevel}}: ensures that functions with free variables that are globally scoped do not needlessly get transformed into closures;
-    \item \textbf{\texttt{exn}}: tests raising and catching exceptions with and without parameters -- section \ref{exceptions};
-    \item \textbf{\texttt{exn\char`_2}}: ensure that exception handlers are popped correctly;
-    \item \textbf{\texttt{exn\char`_builtin}}: tests builtin exceptions -- section \ref{builtin-exceptions};
-    \item \textbf{\texttt{exn\char`_fatal}}: tests that uncaught exceptions trigger a message and abort the program;
-    \item \textbf{\texttt{for}}: tests range-based for loops, including ranges that are negative-lengthed -- section \ref{for-loops};
-    \item \textbf{\texttt{letrec}}: tests basic mutually recursive functions -- section \ref{mutually-recursive-functions};
-    \item \textbf{\texttt{letrec\char`_value}}: tests the ``mutually recursive values'' OCaml feature -- section \ref{mutually-recursive-values};
-    \item \textbf{\texttt{match}}: tests that pattern matching compiles correctly;
-    \item \textbf{\texttt{partialapp}}: tests the last style of closure (partial application);
-    \item \textbf{\texttt{print}}: tests standard library printing functions -- section \ref{pervasives-printing};
-    \item \textbf{\texttt{stdlib\char`_list}}: tests standard library \lstinline!List! functions -- section \ref{module-list};
-    \item \textbf{\texttt{stringswitch}}: tests pattern matching on strings -- section \ref{stringswitch};
-    \item \textbf{\texttt{while}}: tests imperative-style while loops -- section \ref{while-loops}.
+    \item \textbf{\texttt{arithmetic}}: tests integer arithmetic and shift
+        operations, and floating point operations. In particular the sign
+        extension behaviour on 50-bit integers is carefully tested for both
+        arithmetic shift and logical shift operations -- as described in
+        section \ref{50-bit-integer};
+    \item \textbf{\texttt{basic\char`_ops}}: tests compilation and behaviour of
+        nested if statements -- section \ref{module-fixup};
+    \item \textbf{\texttt{basic\char`_types}}: tests basic types: integers,
+        booleans, tuples, lists, reference types
+    \item \textbf{\texttt{closure}}: tests the first two styles of closures
+        (non-empty free variable set) -- as described in section
+        \ref{closures};
+    \item \textbf{\texttt{partialapp}}: tests the last style of closure
+        (partial application);
+    \item \textbf{\texttt{closure\char`_partialapp}}: tests that partial
+        application of a closure itself creates a working closure (contrast
+        with the partialapp test);
+    \item \textbf{\texttt{closure\char`_letrec}}: tests mutually recursive
+        closures;
+    \item \textbf{\texttt{closure\char`_toplevel}}: ensures that functions with
+        free variables that are globally scoped do not needlessly get
+        transformed into closures;
+    \item \textbf{\texttt{exn}}: tests raising and catching exceptions with and
+        without parameters -- section \ref{exceptions};
+    \item \textbf{\texttt{exn\char`_2}}: ensure that exception handlers are
+        popped correctly;
+    \item \textbf{\texttt{exn\char`_builtin}}: tests builtin exceptions --
+        section \ref{builtin-exceptions};
+    \item \textbf{\texttt{exn\char`_fatal}}: tests that uncaught exceptions
+        trigger a message and abort the program;
+    \item \textbf{\texttt{while}}: tests imperative-style while loops --
+        section \ref{while-loops}.
+    \item \textbf{\texttt{for}}: tests range-based for loops, including ranges
+        that are negative-lengthed -- section \ref{for-loops};
+    \item \textbf{\texttt{letrec}}: tests basic mutually recursive functions --
+        section \ref{mutually-recursive-functions};
+    \item \textbf{\texttt{letrec\char`_value}}: tests the ``mutually recursive
+        values'' OCaml feature -- section \ref{mutually-recursive-values};
+    \item \textbf{\texttt{match}}: tests that pattern matching compiles
+        correctly;
+    \item \textbf{\texttt{print}}: tests standard library printing functions --
+        section \ref{pervasives-printing};
+    \item \textbf{\texttt{stdlib\char`_list}}: tests standard library
+        \lstinline!List! functions -- section \ref{module-list};
+    \item \textbf{\texttt{stringswitch}}: tests pattern matching on strings --
+        section \ref{stringswitch};
 
 --
 
@@ -1071,8 +1117,7 @@ which runs twelve versions of each benchmark:
     \item Native code generated by \lstinline!clang! via my OCaml-to-C compiler, with each of four optimisation levels.
 \end{itemize}
 
-
-My benchmarks fall into one of three categories.
+My benchmarks broadly fall into one of three categories.
 
 \subsection{Microbenchmarks}
 Microbenchmarks written by me. These test particular aspects of the
