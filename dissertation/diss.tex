@@ -496,6 +496,46 @@ TODO
 
 TODO
 
+Consider the OCaml expression
+
+\begin{lstlisting}
+let rec a = 1::b and b = 2::a in ...
+\end{lstlisting}
+
+This defines a mutually recursive \textit{value} -- creating a infinite
+(cyclic) list of period 2. The value of \lstinline!a! will be
+\lstinline!1::2::1::2::1:: ...!
+
+In order to ensure correct semantics even in the presence of mutually recursive
+value definitions, my compiler separates the variable definition process into
+three phases:
+
+\begin{enumerate}
+	\item \textbf{Allocation}: first the required memory for each variable are
+		allocated using \lstinline!malloc!;
+	\item \textbf{Closure creation (optional)}: (TODO: move this to the closure section)  at this point the memory
+		addresses of variables are known, and so can be frozen into closures as
+		needed. The process is described in great detail in section \ref{closures}
+		(TODO: actually write this section);
+	\item \textbf{Initialisation}: finally, the contents of the variables are
+		set.
+\end{enumerate}
+
+The resulting C code will look like:
+
+\begin{lstlisting}
+// Phase 1: allocation
+ocaml_value_t a_1213 = NEW_P(malloc(sizeof(ocaml_value_t) * 2));
+ocaml_value_t b_1213 = NEW_P(malloc(sizeof(ocaml_value_t) * 2));
+
+// Phase 3: initialisation
+a_1213[0] = 1;
+a_1213[1] = b_1213;
+b_1213[0] = 2;
+b_1213[1] = a_1213;
+\end{lstlisting}
+(TODO: fix this once list malloc typing works!)
+
 \subsection{Imperative-style while loops}\label{while-loops}
 
 TODO
