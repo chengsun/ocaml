@@ -404,7 +404,7 @@ module Emitcode = struct
         Printf.sprintf "extern %s;" (ctype_and_identifier_to_string t id)
     | C_FunDefn (t,id,args,xs_option) ->
         (ctype_and_identifier_to_string t id) ^ "(" ^
-        (map_intersperse_concat (fun (t,id) -> (ctype_to_string t) ^ " " ^ (fixid (Ident.unique_name id))) ", " args) ^ ")" ^
+        (map_intersperse_concat (fun (t,id) -> ctype_and_identifier_to_string t (C_Variable id)) ", " args) ^ ")" ^
         ( match xs_option with
           | None -> ";"
           | Some xs -> " {\n" ^ (rev_statements_to_string xs) ^ "\n}"
