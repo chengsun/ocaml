@@ -21,7 +21,7 @@
 , breakatwhitespace=true
 , framextopmargin=50pt
 , columns=fullflexible,keepspaces
-, escapeinside={(*}{*)}
+, escapeinside={(!}{!)}
 , upquote=true
 %, frame=bottomline
       }
@@ -232,7 +232,7 @@ Notably this pass does NOT provide:
 \end{enumerate}
 
 My runtime is implemented assuming a fairly particular setup. A 64-bit
-Unix-like environment is required, with the \lstinline!liballocs! library. TODO Elaborate?
+Linux environment is required, with the \lstinline!liballocs! library. TODO Elaborate?
 
 The stages of my C compiler backend are as follows. TODO
 
@@ -377,23 +377,24 @@ high-performance compilers and interpreters:
     three bits zeroed. The disadvantage of this representation is that there is
     no space to represent doubles -- they must be boxed.
   \item \textbf{NaN boxing}, as used by WebKit's JavaScriptCore engine,
-    SpiderMonkey and LuaJIT. This is the scheme I chose to use, and is
-    described in detail in the next section.
+    SpiderMonkey and LuaJIT. This is the scheme I chose to use, because unlike
+    the tagged pointers approach, both immediate integers and doubles can be
+    represented. The details are described in the next section.
 \end{enumerate}
 
 \subsection{NaN boxing}\label{nan-boxing}
 
 NaN boxing allows us to represent doubles unboxed. Our implementation of NaN
-boxing was inspired by JavaScriptCore's (TODO: cite) however the exact details
-are original.
+boxing was inspired by JavaScriptCore's \cite{jscore}, however the exact choice
+of encoding and implementation details are original.
 
 The key idea is that Not-a-Number (NaN) values in IEEE 754 double-precision
 floating point values take up a needlessly large range of the 64-bit space. In
-particular, any number with an exponent of \texttt{0x7FF} and non-zero mantissa
-is a NaN value. There are only two different types of NaNs: quiet (qNaN) and
-signalling (sNaN). Modern CPUs only ever use one specific (canonical) bit
-representation for each type of NaN, which gives us the entire rest of the
-range to embed other types of values into.
+particular, any of the $2^{53}-1$ numbers with an exponent of \texttt{0x7FF} and
+non-zero mantissa is a NaN value. There are only four different NaNs: plus or
+minus quiet ($\pm$qNaN) and signalling ($\pm$sNaN). Modern CPUs only ever use
+one specific (canonical) bit representation for each type of NaN, which leaves
+the rest of the range to embed other types of values into.
 
 \begin{tabular}{c c | c c | c}
     63..52 & 51..0 & 63..52 & 51..0 & purpose \\
@@ -406,12 +407,67 @@ range to embed other types of values into.
     \lstinline!fff! & \lstinline!fffffffffffff! & \lstinline!000! & \lstinline!0ffffffffffff! & Pointers (48-bit space)
 \end{tabular}
 
-Using this representation \lstinline!ocaml_value_t! becomes
-(conceptually) a tagged union of the following:
+Using this representation \lstinline!ocaml_value_t! can be used to wrap one of the following three types in such a way that the original type of the value can be discriminated (i.e. the ranges do not overlap):
 \begin{enumerate}
   \item an unboxed (or \textit{immediate}) 50-bit integer;
   \item an unboxed (or \textit{immediate}) double-precision floating point value (\lstinline!double! in C);
   \item a boxed value -- a pointer to a heap-allocated value (\lstinline!ocaml_value_t*! in C).
+\end{enumerate}
+
+The actual C type definition of \lstinline!ocaml_value_t! is the following union:
+\begin{lstlisting}
+union _ocaml_value_t;
+
+typedef union _ocaml_value_t *generic_datap_t;
+typedef union _ocaml_value_t (*generic_funcp_t)();
+
+typedef union _ocaml_value_t {
+    intptr_t        i;
+    generic_datap_t p;
+    generic_funcp_t fp;
+} ocaml_value_t;
+\end{lstlisting}
+Note that we use the \lstinline!i! field for both integers and doubles. This is
+because doubles need to be reinterpreted as integers in order to apply the
+$2^{48}$ shift as described previously.
+
+Also note that data pointers and function pointers are accessed using different
+union fields, despite the fact that both are 64-bit pointers into the same
+address space on Linux. This is a quirk of C: casting between these two types
+of pointers is undefined behaviour. Interestingly \lstinline!gcc! will indeed
+miscompile code that casts betwen these two types.
+
+We define some helper macros in C:
+\begin{enumerate}
+    \item \lstinline!NEW_I!, \lstinline!NEW_D!, and \lstinline!NEW_P! allow us to
+    wrap raw integer, double or pointer values into new \lstinline!ocaml_value_t!.
+    These perform the encoding step as described previously. For instance,
+    \lstinline!NEW_D! is defined by viewing the double as an integer, and
+    adding $2^{48}$, as follows:
+
+    \begin{lstlisting}
+static intptr_t __double_encode(double x) {
+    union {
+        double d;
+        intptr_t i;
+    } s = {.d = x};
+    return s.i + (1LL<<48);
+}
+#define NEW_D(v) ((ocaml_value_t){.i = __double_encode(v)})\end{lstlisting}
+
+    \item \lstinline!GET_I!, \lstinline!GET_D!, and \lstinline!GET_P! allow us to
+        unwrap an \lstinline{ocaml_value_t} back into a raw integer, double or
+        pointer value respectively. For instance, \lstinline!GET_D! is defined
+        as:
+        \begin{lstlisting}
+#define GET_D(v) (__double_decode((v).i))\end{lstlisting}
+        where \lstinline!__double_decode! is the inverse of the \lstinline!__double_encode! operation defined previously.
+
+    \item \lstinline!IS_I!, \lstinline!IS_D!, and \lstinline!IS_P! allow us to
+        discriminate which type of value is wrapped inside an
+        \lstinline{ocaml_value_t}. This is done by simple integer range tests -- for instance:
+        \begin{lstlisting}
+#define IS_I(v) ((uintptr_t) (v).i >= 0xfffc000000000000ULL)\end{lstlisting}
 \end{enumerate}
 
 \subsection{50-bit integer arithmetic}\label{50-bit-integer}
@@ -429,9 +485,11 @@ The only cases where non-word sized integers need careful treatment are operatio
   \item arithmetic shift, where the shifted-in bits are set to the sign bit.
 \end{itemize}
 
-Logical right shift is relatively simple -- first set the top 14 bits to zero by using a mask, then perform a native-width logical right shift.
+Logical right shift (lsr) is relatively simple -- first set the top 14 bits to zero by using a mask, then perform a native-width logical right shift.
 
-Arithmetic right and division are trickier. We first need to ``clean up'' the top 14 bits by extending our real sign bit (bit 49) into them. This can be achieved using the following C bitfield trick:
+Arithmetic right shift (asr) and division are trickier. We first need to
+``clean up'' the top 14 bits by extending our real sign bit (bit 49) into them.
+This can be achieved using the following C bitfield trick:
 \begin{lstlisting}
 static intptr_t __sext50(intptr_t x) {
     struct {
@@ -445,7 +503,8 @@ This defines a bitfield integer which is logically 50 bits long. We write
 \lstinline!x! into it, and then read out a value of type \lstinline!intptr_t!
 (which is 64 bits long). C semantics cause the 50-bit field to be sign extended
 into the rest of the integer, which is exactly the operation we want.\footnote{
-The compiler will probably implement this as \lstinline!(x lsl 14) asr 14!.}
+The compiler will likely implement this under the hood as
+\lstinline!(x lsl 14) asr 14!.}
 
 \subsection{Casting \texttt{ctype}s}
 
@@ -459,7 +518,7 @@ into type ``target'' is defined as below:
 \begin{enumerate}
   \item If source and target are the same, nothing needs to be done;
   \item If source is \lstinline!C_Value! and target is not, then we need to
-    unbox the expression. Assuming the cast is valid, then 
+    unwrap the expression. Assuming the cast is valid, then 
     that
 \end{enumerate}
 
@@ -962,7 +1021,7 @@ with the standard C calling convention is equivalent to a call to
 \lstinline!f_impl(1, 2, 3, env)!.
 
 The technique that we use involves the creation of machine code stubs at
-runtime. This was pioneered by Breuel (TODO: cite). However, our implementation
+runtime. This approach was pioneered by Breuel \cite{breuel88}. However, our implementation
 was developed completely from scratch, and many details differ from the
 approach outlined in the paper.
 
@@ -1035,7 +1094,7 @@ ABI.
   6 & \lstinline!r9!
 \end{tabular}
 
-We shall place \lstinline!env! into the $(\text{\lstinline|n\_args|}+1)$-th
+We shall place \lstinline!env! into the $(\text{\texttt{n\char`_args}}+1)$-th
 argument. Call the corresponding register \lstinline!REG_ENV!.
 
 This is the assembly listing for the machine code generated:
@@ -1267,19 +1326,20 @@ A selection of illustrative tests, and the C code produced, is given below.
 
 My benchmarking methodology relies on a shell script \lstinline!benchmark.sh!,
 which runs twelve versions of each benchmark:
-
 \begin{itemize}
     \item Bytecode generated by the upstream \lstinline!ocamlc! bytecode compiler. These are run with \lstinline!ocamlrun! (the upstream optimised bytecode interpreter), with default GC settings, and disabled GC settings;
     \item Native code generated by the upstream \lstinline!ocamlopt! native compiler, with default GC settings, and disabled GC settings;
-    \item Native code generated by \lstinline!gcc! via my OCaml-to-C compiler, with each of four optimisation levels (\lstinline!-O0!, \lstinline!-O1!, \lstinline!-O2!, \lstinline!-O3!);
-    \item Native code generated by \lstinline!clang! via my OCaml-to-C compiler, with each of four optimisation levels.
+    \item Native code generated by \lstinline!gcc! via my OCaml-to-C compiler, at each of four optimisation levels (\lstinline!-O0!, \lstinline!-O1!, \lstinline!-O2!, \lstinline!-O3!);
+    \item Native code generated by \lstinline!clang! via my OCaml-to-C compiler, at each of four optimisation levels.
 \end{itemize}
+
+I used R and ggplot2 to process and graph the results, learning the language and library from scratch.
 
 My benchmarks broadly fall into one of three categories.
 
 \subsection{Microbenchmarks}
-Microbenchmarks written by me. These test particular aspects of the
-performance of the generated code.
+These microbenchmarks written from scratch by me. These test particular aspects
+of the performance of the generated code.
 
 \begin{enumerate}
   \item
@@ -1398,7 +1458,20 @@ Limitations:
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % the bibliography
 \addcontentsline{toc}{chapter}{Bibliography}
-\bibliography{refs}
+\begin{thebibliography}{1}
+
+\bibitem{breuel88}
+  Thomas Breuel,
+  \emph{Lexical Closures for C++},
+  In Proc. USENIX C++ Conf., pages 293-304,
+  Denver, CO, October 1988.  \\ \url{http://www.cl.cam.ac.uk/~srk31/teaching/redist/breuel88lexical.pdf}
+
+\bibitem{jscore}
+  WebKit authors,
+  \emph{JSValue.h}
+  \url{https://github.com/WebKit/webkit/blob/master/Source/JavaScriptCore/runtime/JSCJSValue.h}
+
+\end{thebibliography}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % the appendices
