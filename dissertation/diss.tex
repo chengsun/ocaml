@@ -1290,6 +1290,11 @@ performance of the generated code.
     The \textbf{\texttt{closure\char`_invoke\char`_<n>}} family of benchmarks the performance of
     invoking closures which take $n$ arguments and capture 1 environment value.
 
+    As described in section \ref{closures}, invoking closures which take $n >
+    5$ arguments requires more work to be done by the generated code stub.
+
+    TODO
+
   \item
     The \textbf{\texttt{closure\char`_capture\char`_<n>}} family of benchmarks the performance
     of invoking closures which take 1 argument and capture $n$ variables from their environment.
