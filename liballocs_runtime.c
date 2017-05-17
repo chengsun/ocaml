@@ -9,6 +9,10 @@
 #include <string.h>    // for memcpy
 #include <sys/mman.h>  // for mmap
 
+#ifdef ENABLE_LIBALLOCS
+#include <liballocs.h>
+#endif
+
 #include "liballocs_runtime.h"
 
 /*****************************************************************************
@@ -172,14 +176,45 @@ DEFINE_BUILTIN_EXCEPTION(Undefined_recursive_module)
 #undef DEFINE_BUILTIN_EXCEPTION
 
 
+#ifdef ENABLE_LIBALLOCS
+void ocaml_liballocs_recursive_show(ocaml_value_t v) {
+    if (IS_P(v)) {
+        struct uniqtype *type = __liballocs_get_alloc_type(GET_P(v));
+        const char *type_name = __liballocs_uniqtype_name(type);
+        int n = type->pos_maxoff / 8;
+
+        fprintf(stderr, "[ ");
+        for (int i = 0; i < n; i += 8) {
+            ocaml_liballocs_recursive_show(GET_P(v)[i]);
+            if (i > 0 && i < n-1) {
+                fprintf(stderr, ", ");
+            }
+        }
+        fprintf(stderr, " ] : %s\n", type_name);
+
+    } else if (IS_I(v)) {
+        fprintf(stderr, "%"PRIiPTR"\n", GET_I(v));
+    } else if (IS_D(v)) {
+        fprintf(stderr, "%f\n", GET_D(v));
+    } else {
+        assert(false);
+    }
+}
+#endif
 
 void ocaml_show(ocaml_value_t v) {
     if (IS_P(v)) {
-        fprintf(stderr, "pointer-like: %"PRIxPTR"\n", (uintptr_t)GET_P(v));
+        fprintf(stderr, "%"PRIxPTR" : pointer\n", (uintptr_t)GET_P(v));
+#ifdef ENABLE_LIBALLOCS
+        struct uniqtype *type = __liballocs_get_alloc_type(GET_P(v));
+        const char *name = __liballocs_uniqtype_name(type);
+        fprintf(stderr, "of type %s\n", name);
+        int size = type->pos_maxoff;
+#endif
     } else if (IS_I(v)) {
-        fprintf(stderr, "integer-like: %"PRIiPTR"\n", GET_I(v));
+        fprintf(stderr, "%"PRIiPTR" : integer\n", GET_I(v));
     } else if (IS_D(v)) {
-        fprintf(stderr, "float-like: %f\n", GET_D(v));
+        fprintf(stderr, "%f : float\n", GET_D(v));
     } else {
         assert(false);
     }
