@@ -46,7 +46,7 @@ module C = struct
   type ctype =
     | C_CommentedType of ctype * string
     | C_Pointer of ctype
-    | C_Boxed (* the union ocaml_value_t *)
+    | C_Value (* the union ocaml_value_t *)
     | C_Void
     | C_Int
     | C_Double
@@ -62,7 +62,7 @@ module C = struct
   let rec ctype_to_string = function
     | C_CommentedType (cty, comment) -> Printf.sprintf "%s/*%s*/" (ctype_to_string cty) comment
     | C_Pointer cty -> (ctype_to_string cty) ^ "*"
-    | C_Boxed -> "ocaml_value_t"
+    | C_Value -> "ocaml_value_t"
     | C_Void -> "void"
     | C_Int -> "intptr_t"
     | C_UInt -> "uintptr_t"
@@ -83,7 +83,7 @@ module C = struct
     if at = bt then at
     else if at = C_WhateverType then bt
     else if bt = C_WhateverType then at
-    else if at = C_Boxed || bt = C_Boxed then C_Boxed
+    else if at = C_Value || bt = C_Value then C_Value
     else if at = C_Pointer C_Void then bt (* HACK: lambda likes to use Const_pointer 0 to represent nil, false, ... *)
     else if bt = C_Pointer C_Void then at
     else (
@@ -171,7 +171,7 @@ module C = struct
 
   let rec ctype_size_nwords = function
     | C_CommentedType (cty, _) -> ctype_size_nwords cty
-    | C_Pointer _ | C_FunPointer _ | C_Boxed | C_Int | C_Double | C_UInt -> 1
+    | C_Pointer _ | C_FunPointer _ | C_Value | C_Int | C_Double | C_UInt -> 1
     | C_Struct (_, tys) -> List.fold_left (fun acc (t,_) -> acc + (ctype_size_nwords t)) 0 tys
     | C_Bool | C_Char -> failwith "bools/chars have sub-word size"
     | C_VarArgs | C_Void | C_WhateverType ->
@@ -183,8 +183,8 @@ module C = struct
     let box_kind = function
       | C_Int | C_UInt | C_Bool | C_Char -> "i", C_Int
       | C_Double -> "d", C_Double
-      | C_Pointer _ -> "p", C_Pointer C_Boxed
-      | C_FunPointer _ -> "fp", C_FunPointer (C_Boxed, [])
+      | C_Pointer _ -> "p", C_Pointer C_Value
+      | C_FunPointer _ -> "fp", C_FunPointer (C_Value, [])
       | _ ->
           failwith (Printf.sprintf "bad cast from %s to %s: invalid box kind" (ctype_to_string source_ctype) (ctype_to_string target_ctype))
     in
@@ -195,7 +195,7 @@ module C = struct
     let result =
       if st = tt then (
         source_cexpr
-      ) else if st <> C_Boxed && tt <> C_Boxed then (
+      ) else if st <> C_Value && tt <> C_Value then (
         (* we need to cast *)
         (* make sure the cast is sensible *)
         let skind = fst (box_kind st) in
@@ -206,14 +206,14 @@ module C = struct
           failwith (Printf.sprintf "bad cast from %s to %s: differing box kinds" (ctype_to_string source_ctype) (ctype_to_string target_ctype))
         end;
         C_Cast (tt, source_cexpr)
-      ) else if st = C_Boxed then (
+      ) else if st = C_Value then (
         (* we need to unbox according to target_ctype *)
         let box_field, box_canon_type = box_kind tt in
         cast tt (box_canon_type,
           C_FunCall (C_GlobalVariable (Printf.sprintf "GET_%s" (String.uppercase_ascii box_field)),
             [source_cexpr])
         )
-      ) else if tt = C_Boxed then (
+      ) else if tt = C_Value then (
         (* we need to box according to source_ctype *)
         let box_field, box_canon_type = box_kind st in
         C_Cast (tt,
@@ -465,20 +465,20 @@ module TypeLibrary = struct
     | Tarrow (_label, t1, t2, _commutable) ->
         (* don't want this for now because of risk of passing/returning non-qword sized args (structs) *)
         (* ocaml_tarrow_to_c_type ((ocaml_to_c_type t1) :: accum) t2 *)
-        ocaml_tarrow_to_c_type (C_Boxed :: accum) t2
+        ocaml_tarrow_to_c_type (C_Value :: accum) t2
     | _ ->
         (* C_FunPointer (ocaml_to_c_type type_expr, List.rev accum) *)
-        C_FunPointer (C_Boxed, List.rev accum)
+        C_FunPointer (C_Value, List.rev accum)
 
   and ocaml_to_c_type type_expr =
     match type_expr.desc with
-    | Tvar _ -> C_Boxed
+    | Tvar _ -> C_Value
     | Tarrow _ -> ocaml_tarrow_to_c_type [] type_expr
     | Tconstr (path, [], _) when path = Predef.path_int -> C_Int
     | Tconstr (path, [], _) when path = Predef.path_string -> C_Pointer C_Char
     | Tconstr (path, [], _) when path = Predef.path_float -> C_Double
     (* TODO: add more *)
-    | Tconstr _ -> C_CommentedType (C_Boxed, Printf.sprintf "unknown Tconstr %s" (formats Printtyp.type_expr type_expr))
+    | Tconstr _ -> C_CommentedType (C_Value, Printf.sprintf "unknown Tconstr %s" (formats Printtyp.type_expr type_expr))
     | Ttuple _
     | Tobject _ ->
         (try TypeHash.find g_table type_expr
@@ -514,7 +514,7 @@ module VarLibrary = struct
       try VarHash.find t id
       with Not_found -> (
         Printf.printf "\n<<<<<<<<<<<<<<<<<<<<WARNING>>>>>>>>>>>>>>>>>>>>\ntype of %s not found. substituting with ocaml_value_t\n<<<<<<<<<<<<<<<<<<<<WARNING>>>>>>>>>>>>>>>>>>>>\n" (Ident.unique_name id);
-        C_Boxed
+        C_Value
       )
     in
     the_ctype
@@ -550,9 +550,9 @@ module VarLibrary = struct
     VarHash.clear t;
     (* prepopulate with some inbuilt modules *)
     List.iter (fun (ty, id) -> set_ctype t ty id)
-    [ C_Pointer C_Boxed, Ident.create_persistent "Pervasives"
-    ; C_Pointer C_Boxed, Ident.create_persistent "Printf"
-    ; C_Pointer C_Boxed, Ident.create_persistent "List"
+    [ C_Pointer C_Value, Ident.create_persistent "Pervasives"
+    ; C_Pointer C_Value, Ident.create_persistent "Printf"
+    ; C_Pointer C_Value, Ident.create_persistent "List"
     ]
 
 
@@ -603,16 +603,16 @@ let do_allocation nwords (type_expr_result : _ result) =
         let ctype_size = ctype_size_nwords ctype in
         assert (ctype_size = nwords);
         C_Pointer ctype, 1
-    | Error _ -> C_Boxed, nwords
+    | Error _ -> C_Value, nwords
   in
   C_Allocate(ctype, n, type_expr_result)
 
 (* TODO this is all bad *)
 let get_function_type params =
   let typedparams = List.map (fun id ->
-      C_Boxed, id
+      C_Value, id
     ) params in
-  let ret_type = C_Boxed in
+  let ret_type = C_Value in
   ret_type, typedparams
 
 (* gets a valid type that lam could be put into.
@@ -627,9 +627,9 @@ let rec letdecl_ctype lam =
     let ret_type, typedparams = get_function_type params in
     C_FunPointer (ret_type, List.map fst typedparams)
   | Lprim (Pmakeblock _, _) ->
-    C_Pointer C_Boxed
+    C_Pointer C_Value
   | _ ->
-    C_Boxed
+    C_Value
 
 (* translate a let* to a variable or function declaration. [id] can be used to refer
  * to this let binding after the statements this returns.
@@ -651,12 +651,12 @@ let rec let_to_definitions ?(at_root=false) id lam =
       | e_head::el ->
           let texpr = lambda_to_texpression e_head in
           (* TODO: this could be done better *)
-          let elem = C_ArrayIndex (C_Cast (C_Pointer C_Boxed, var), C_IntLiteral (Int64.of_int k)) in
-          let assign = C_Assign (elem, cast C_Boxed texpr) in
+          let elem = C_ArrayIndex (C_Cast (C_Pointer C_Value, var), C_IntLiteral (Int64.of_int k)) in
+          let assign = C_Assign (elem, cast C_Value texpr) in
           construct (succ k) (assign::statements) el
     in
     let postinit_sl = construct 0 [] contents in
-    let block_type = C_Pointer C_Boxed in
+    let block_type = C_Pointer C_Value in
     let gotten_ctype = VarLibrary.set_or_get_ctype varlib block_type id in
     [ VarDefn (gotten_ctype, id,
              cast gotten_ctype (block_type, do_allocation (List.length contents) tyinfo),
@@ -710,21 +710,21 @@ and tclosurify name_hint env_mapping ret_type typedparams cbody =
       let env_id = Ident.create "__env" in
       let env_elt i = C_ArrayIndex (C_Variable env_id, C_IntLiteral (Int64.of_int i)) in
 
-      let env_type = C_Pointer C_Boxed in
+      let env_type = C_Pointer C_Value in
       let env_sl_post = List.fold_left (fun sl (i, (_fv_id, fv_tvalue)) ->
-        C_Assign (env_elt i, cast C_Boxed fv_tvalue) :: sl
+        C_Assign (env_elt i, cast C_Value fv_tvalue) :: sl
       ) [] env_mapping in
       let env_sl_letdefn =
         VarDefn (
           env_type,
           env_id,
-          C_Allocate (C_Boxed, List.length env_mapping, Error "tclosurify environment"),
+          C_Allocate (C_Value, List.length env_mapping, Error "tclosurify environment"),
           env_sl_post
         )
       in
 
       let unenv_sl = List.fold_left (fun sl (i, (fv_id, (fv_ty, _))) ->
-        C_VarDeclare (fv_ty, C_Variable fv_id, Some (cast fv_ty (C_Boxed, env_elt i))) :: sl
+        C_VarDeclare (fv_ty, C_Variable fv_id, Some (cast fv_ty (C_Value, env_elt i))) :: sl
       ) [] env_mapping in
 
       (env_type, env_id, C_Variable env_id, [env_sl_letdefn], unenv_sl)
@@ -748,7 +748,7 @@ and tclosurify name_hint env_mapping ret_type typedparams cbody =
     C_FunCall (C_GlobalVariable "ocaml_liballocs_close",
       [ C_Variable id_fun
       ; C_IntLiteral (Int64.of_int n_args)
-      ; cast C_Boxed (env_type, env_value)
+      ; cast C_Value (env_type, env_value)
       ]
     )
   in
@@ -864,15 +864,15 @@ and lambda_to_texpression lam : C.texpression =
       | Popaque, [Lprim (Pgetglobal id, [])] ->
           if List.mem id Predef.all_predef_exns then begin
             (* this is a predefined exception *)
-            VarLibrary.set_ctype varlib (C_Pointer C_Boxed) id;
-            C_Pointer C_Boxed, C_GlobalVariable (Ident.name id)
+            VarLibrary.set_ctype varlib (C_Pointer C_Value) id;
+            C_Pointer C_Value, C_GlobalVariable (Ident.name id)
           end else begin
             (* assume these are declarations of use of external modules; ensure initialisation *)
             extern_decls :=
               C_FunDefn (C_Void, C_GlobalVariable (module_initialiser_name (Ident.name id)), [], None) ::
-              C_ExternDecl (C_Pointer C_Boxed, C_GlobalVariable (Ident.name id)) ::
+              C_ExternDecl (C_Pointer C_Value, C_GlobalVariable (Ident.name id)) ::
               !extern_decls;
-            C_Pointer C_Boxed, (* all modules are represented as arrays of ocaml_value_t *)
+            C_Pointer C_Value, (* all modules are represented as arrays of ocaml_value_t *)
             C_InlineRevStatements (VarLibrary.ctype varlib id,
               [ C_Expression (C_GlobalVariable (Ident.name id))
               ; C_Expression (C_FunCall (C_GlobalVariable (module_initialiser_name (Ident.name id)), []))])
@@ -895,16 +895,16 @@ and lambda_to_texpression lam : C.texpression =
       | Pfield i, [lam]
       | Pfloatfield i, [lam] ->
           (* TODO: make this use type-specific accessors if possible *)
-          C_Boxed,
-          C_ArrayIndex (cast (C_Pointer C_Boxed) (lambda_to_texpression lam), C_IntLiteral (Int64.of_int i))
+          C_Value,
+          C_ArrayIndex (cast (C_Pointer C_Value) (lambda_to_texpression lam), C_IntLiteral (Int64.of_int i))
       | Psetfield (i, (Immediate | Pointer), Assignment), [lam; lval] ->
           (* note we assign immediates and pointers in the same way *)
           (* TODO: make this use type-specific accessors if possible *)
-          C_Boxed,
-          C_InlineRevStatements (C_Boxed, [
+          C_Value,
+          C_InlineRevStatements (C_Value, [
             C_Assign (
-              C_ArrayIndex (cast (C_Pointer C_Boxed) (lambda_to_texpression lam), C_IntLiteral (Int64.of_int i)),
-              cast C_Boxed (lambda_to_texpression lval)
+              C_ArrayIndex (cast (C_Pointer C_Value) (lambda_to_texpression lam), C_IntLiteral (Int64.of_int i)),
+              cast C_Value (lambda_to_texpression lval)
             )
           ])
       | Pmakeblock (tag, mut, tyinfo), contents ->
@@ -915,11 +915,11 @@ and lambda_to_texpression lam : C.texpression =
             | e_head::el ->
                 let texpr = lambda_to_texpression e_head in
                 let elem = C_ArrayIndex (var, C_IntLiteral (Int64.of_int k)) in
-                let assign = C_Assign (elem, cast C_Boxed texpr) in
+                let assign = C_Assign (elem, cast C_Value texpr) in
                 construct (succ k) (assign::statements) el
           in
           let postinit_sl = construct 0 [] contents in
-          let block_type = C_Pointer C_Boxed in
+          let block_type = C_Pointer C_Value in
           block_type, C_LetExpression [
             VarDefn (block_type, id,
                      do_allocation (List.length contents) tyinfo,
@@ -961,11 +961,11 @@ and lambda_to_texpression lam : C.texpression =
       | Pccall {prim_name; prim_arity}, lam ->
           assert (List.length lam = prim_arity);
           let args =
-            List.map (fun x -> cast C_Boxed (lambda_to_texpression x)) lam
+            List.map (fun x -> cast C_Value (lambda_to_texpression x)) lam
           in
-          C_Boxed, C_FunCall (C_GlobalVariable prim_name, args)
+          C_Value, C_FunCall (C_GlobalVariable prim_name, args)
       | Praise(Raise_regular | Raise_reraise), [e] ->
-          C_Boxed, C_FunCall (C_GlobalVariable "ocaml_liballocs_raise_exn", [cast C_Boxed (lambda_to_texpression e)])
+          C_Value, C_FunCall (C_GlobalVariable "ocaml_liballocs_raise_exn", [cast C_Value (lambda_to_texpression e)])
       | Pstringlength, [e] ->
           C_Int, C_FunCall (C_GlobalVariable "strlen", [cast (C_Pointer C_Char) (lambda_to_texpression e)])
       | Pstringrefs, [es; en] ->
@@ -990,20 +990,20 @@ and lambda_to_texpression lam : C.texpression =
     let ctype, expr = lambda_to_texpression e_id in
     let apfunc_actual_ctype =
       if vararg
-      then C_FunPointer (C_Boxed, [C_Boxed; C_VarArgs])
+      then C_FunPointer (C_Value, [C_Value; C_VarArgs])
       else ctype
     in
     let ret_ctype, arg_ctypes, apfunc_actual_ctype =
       match apfunc_actual_ctype with
       | C_FunPointer (x, a) when vararg ->
-          x, List.map (fun _ -> C_Boxed) ap_args, apfunc_actual_ctype
+          x, List.map (fun _ -> C_Value) ap_args, apfunc_actual_ctype
       | C_FunPointer (x, a) when not vararg ->
           x, a, apfunc_actual_ctype
-      | C_Boxed ->
+      | C_Value ->
           (* calling a boxed function pointer -- have to guess... *)
           (* for instance (field 0 (global List!)) *)
-          let arg_ctypes = List.map (fun _ -> C_Boxed) ap_args in
-          C_Boxed, arg_ctypes, C_FunPointer (C_Boxed, arg_ctypes)
+          let arg_ctypes = List.map (fun _ -> C_Value) ap_args in
+          C_Value, arg_ctypes, C_FunPointer (C_Value, arg_ctypes)
       | _ -> failwith "Lapply on non-function expression?"
     in
     let c_ap_func = cast apfunc_actual_ctype (ctype, expr) in
@@ -1068,7 +1068,7 @@ and lambda_to_trev_statements lam =
       C_Pointer C_Void, [C_ForInt (param, cexpr_lo, plim, cexpr_hi, dir, sl_body)]
 
   | Ltrywith (lbody, param, lhandler) ->
-      VarLibrary.set_ctype varlib C_Boxed param;
+      VarLibrary.set_ctype varlib C_Value param;
       let trev_body = lambda_to_trev_statements lbody in
       let trev_hand = lambda_to_trev_statements lhandler in
       let (ctype, sl_body, sl_hand) = unify_revsts ~hint:"trywith" trev_body trev_hand in
@@ -1080,7 +1080,7 @@ and lambda_to_trev_statements lam =
         ]
       in
       let sl_hand = sl_hand @ [
-          C_VarDeclare (C_Boxed, C_Variable param, Some (C_FunCall (C_GlobalVariable "ocaml_liballocs_get_exn", [])))
+          C_VarDeclare (C_Value, C_Variable param, Some (C_FunCall (C_GlobalVariable "ocaml_liballocs_get_exn", [])))
           ; pop_statement
         ]
       in
@@ -1154,7 +1154,7 @@ let rec lambda_to_module_constructor_sl export_var lam =
   | Lprim (Pmakeblock(tag, Immutable, tyinfo), largs) ->
       (* This is THE immutable makeblock at the toplevel. *)
       let ctype, es = lambda_to_texpression lam in
-      assert (ctype = C_Pointer C_Boxed);
+      assert (ctype = C_Pointer C_Value);
       [C_Assign (export_var, es)]
   | _ -> failwith ("lambda_to_module_constructor_sl " ^ (formats Printlambda.lambda lam))
 
@@ -1344,5 +1344,5 @@ let compile_implementation modulename lambda =
   [C_TopLevelComment "global typedecls:"] @ global_typedecls @
   [C_TopLevelComment "extern decls:"] @ !Translate.extern_decls @
   [C_TopLevelComment "toplevels:"] @ [
-    C_GlobalDefn (C_Pointer C_Boxed, module_export_var, None)
+    C_GlobalDefn (C_Pointer C_Value, module_export_var, None)
   ] @ fixed_toplevels

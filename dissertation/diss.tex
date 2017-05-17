@@ -231,6 +231,9 @@ Notably this pass does NOT provide:
     \end{enumerate}
 \end{enumerate}
 
+My runtime is implemented assuming a fairly particular setup. A 64-bit
+Unix-like environment is required, with the \lstinline!liballocs! library. TODO Elaborate?
+
 The stages of my C compiler backend are as follows. TODO
 
 \subsection{\texttt{module C}: the extended C abstract syntax tree datatype}
@@ -242,27 +245,26 @@ The tree datatype is slightly more expressive than standard ANSI C. These extra
 features are rewritten into standard C in a later pass, as detailed later in
 section \ref{module-fixup}.
 
-The following datatypes are defined:
+The following datatypes are defined for use inside my compiler. Their output representations in the C code are described in later sections.
 
 \begin{itemize}
   \item
     \lstinline!C.ctype! represents a C type. Notable constructors include:
 
     \begin{itemize}
-        \item \lstinline!C_Pointer of C.ctype!
-        \item \lstinline!C_Boxed! representing a generic OCaml value -- either
-            an immediate int, immediate double or a pointer to a heap-allocated
-            object. The representation of this is discussed in detail in
-            section \ref{nan-boxing}.
-        \item \lstinline!C_Int!
-        \item \lstinline!C_Double!
-        \item \lstinline!C_Struct of Ident.t * (C.ctype * string) list!
+        \item \lstinline!C_Pointer of C.ctype!;
+        \item \lstinline!C_Value!, a word-sized type capable of representing
+          any OCaml value -- described later in section \ref{value-representation};
+        \item \lstinline!C_Int!;
+        \item \lstinline!C_Double!;
+        \item \lstinline!C_Struct of Ident.t * (C.ctype * string) list!;
         \item \lstinline!C_FunPointer of C.ctype * C.ctype list! taking return
-            type and argument types
+            type and argument types.
     \end{itemize}
 
-    For instance, a function pointer of type \lstinline!void (*)(double *)! is
-    represented as \lstinline!C_FunPointer (C_Void, C_Pointer C_Double)!.
+    For instance, the type of a function pointer \lstinline!void (*)(double *)! is
+    represented in my OCaml code as
+    \lstinline!C_FunPointer (C_Void, C_Pointer C_Double)!.
   \item
     \lstinline!C.expression! represents an expression -- program fragments that
     evaluate to a value (possibly of type \lstinline!void!). Notable
@@ -330,6 +332,139 @@ The following datatypes are defined:
 
 Refer to (appendix -- section TODO) for the complete datatype definition.
 
+\section{Runtime value representation}\label{value-representation}
+
+In the produced C code, \lstinline!ocaml_value_t! is a type which is capable of
+representing any OCaml value. This type corresponds to the \lstinline!C_Value!
+datatype in my compiler. This type is required to represent polymorphic OCaml types: for instance a function with a parameter of OCaml type \lstinline!'a! would take a C parameter of type \lstinline!ocaml_value_t!.\footnote{As it turns out, it's easier to represent \textit{all} OCaml values as values of this type, not just polymorphic ones.}
+
+A simple way of implementing this type is to make all OCaml values boxed. This means
+that everything is allocated on the heap, and the variables of type
+\lstinline!ocaml_value_t! are all just pointers into the heap. However this has
+several significant downsides.
+
+One downside of using boxed objects is that the extra indirection required to
+access each variable is very slow. Another is that boxing small types, such as
+integers, requires twice as much memory -- one word-sized integer on the heap
+and the word-sized pointer to it.
+
+Because of this, my \lstinline!ocaml_value_t! representation is actually
+capable of storing some types of value unboxed. We would still like
+\lstinline!ocaml_value_t! to be exactly 64-bits in size, so that it fits into a
+register. A technique is needed to fit both pointers and \textit{immediates}
+(unboxed values such as integers and floating point numbers) into such a
+word-sized type. Various such techniques have been used over the years by
+high-performance compilers and interpreters:
+\begin{enumerate}
+  \item \textbf{untagged values}, as used by the D programming language, for
+    example. This ``technique'' simply represents each type of value as itself.
+    Note that there is no way to tell what type the value is just from inspecting the value itself.
+
+    Although OCaml is an example of a statically typechecked language which would
+    still be correct without runtime type information\footnote{Almost -- OCaml's
+    ``polymorphic comparisons'' feature require a limited form of value tagging
+    to support structural comparison.}, this approach is not used by the upstream
+    compiler. This is because any garbage collector that works with such a
+    value representation must be conservative, which has many
+    disadvantages.
+  \item \textbf{tagged pointers}, as used by OCaml's upstream compiler, the V8
+    JavaScript engine, and many others. This technique steals the least
+    significant bit of each 64-bit value to use as a ``tag bit'', signifying whether
+    that value is boxed or not. In OCaml's scheme, an unset tag bit indicates
+    that the value is a pointer, and a set bit indicates an immediate 63-bit integer.
+    The reason this works is because pointers to valid OCaml objects are always
+    8-byte aligned, which means that all valid pointers have the bottom
+    three bits zeroed. The disadvantage of this representation is that there is
+    no space to represent doubles -- they must be boxed.
+  \item \textbf{NaN boxing}, as used by WebKit's JavaScriptCore engine,
+    SpiderMonkey and LuaJIT. This is the scheme I chose to use, and is
+    described in detail in the next section.
+\end{enumerate}
+
+\subsection{NaN boxing}\label{nan-boxing}
+
+NaN boxing allows us to represent doubles unboxed. Our implementation of NaN
+boxing was inspired by JavaScriptCore's (TODO: cite) however the exact details
+are original.
+
+The key idea is that Not-a-Number (NaN) values in IEEE 754 double-precision
+floating point values take up a needlessly large range of the 64-bit space. In
+particular, any number with an exponent of \texttt{0x7FF} and non-zero mantissa
+is a NaN value. There are only two different types of NaNs: quiet (qNaN) and
+signalling (sNaN). Modern CPUs only ever use one specific (canonical) bit
+representation for each type of NaN, which gives us the entire rest of the
+range to embed other types of values into.
+
+\begin{tabular}{c c | c c | c}
+    63..52 & 51..0 & 63..52 & 51..0 & purpose \\
+    \lstinline!fff! & \lstinline!0000000000000! & \lstinline!fff! & \lstinline!1000000000000! & Negative infinity \\
+    \lstinline!fff! & \lstinline!4000000000000! & \lstinline!fff! & \lstinline!5000000000000! & Negative signalling NaN (canonical) \\
+    \lstinline!fff! & \lstinline!8000000000000! & \lstinline!fff! & \lstinline!9000000000000! & Negative quiet NaN (canonical) \\
+    \lstinline!fff! & \lstinline!b000000000000! & \lstinline!fff! & \lstinline!c000000000000! & Integers (50-bit space) \\
+    \lstinline!fff! & \lstinline!effffffffffff! & \lstinline!fff! & \lstinline!fffffffffffff! & Integers (50-bit space) \\
+    \lstinline!fff! & \lstinline!f000000000000! & \lstinline!000! & \lstinline!0000000000000! & Pointers (48-bit space) \\
+    \lstinline!fff! & \lstinline!fffffffffffff! & \lstinline!000! & \lstinline!0ffffffffffff! & Pointers (48-bit space)
+\end{tabular}
+
+Using this representation \lstinline!ocaml_value_t! becomes
+(conceptually) a tagged union of the following:
+\begin{enumerate}
+  \item an unboxed (or \textit{immediate}) 50-bit integer;
+  \item an unboxed (or \textit{immediate}) double-precision floating point value (\lstinline!double! in C);
+  \item a boxed value -- a pointer to a heap-allocated value (\lstinline!ocaml_value_t*! in C).
+\end{enumerate}
+
+\subsection{50-bit integer arithmetic}\label{50-bit-integer}
+
+NaN boxing limits our integers to be 50-bit sized. Luckily, the size of OCaml's
+standard unboxed integer is deliberately left unspecified -- in fact the
+upstream compiler uses either 31-bit or 63-bit integers depending on the
+platform.
+
+Interestingly, most native word-sized arithmetic operations work correctly on non-word-sized integers, due to the properties of modular arithmetic and twos complement representation. For instance, consider two 50-bit integers stored in 64-bit registers, with arbitrary values for the top 14 bits. A 64-bit multiply of the two registers will generate the correct answer in the bottom 50 bits of the resulting register.
+
+The only cases where non-word sized integers need careful treatment are operations where more significant bits in the input can influence less significant bits in the output, such as the right shift and divide operations. OCaml has two shifts:
+\begin{itemize}
+  \item logical shift, where the shifted-in bits are set to zero;
+  \item arithmetic shift, where the shifted-in bits are set to the sign bit.
+\end{itemize}
+
+Logical right shift is relatively simple -- first set the top 14 bits to zero by using a mask, then perform a native-width logical right shift.
+
+Arithmetic right and division are trickier. We first need to ``clean up'' the top 14 bits by extending our real sign bit (bit 49) into them. This can be achieved using the following C bitfield trick:
+\begin{lstlisting}
+static intptr_t __sext50(intptr_t x) {
+    struct {
+        intptr_t x : 50;
+    } s = {x};
+    return s.x;
+}
+\end{lstlisting}
+
+This defines a bitfield integer which is logically 50 bits long. We write
+\lstinline!x! into it, and then read out a value of type \lstinline!intptr_t!
+(which is 64 bits long). C semantics cause the 50-bit field to be sign extended
+into the rest of the integer, which is exactly the operation we want.\footnote{
+The compiler will probably implement this as \lstinline!(x lsl 14) asr 14!.}
+
+\subsection{Casting \texttt{ctype}s}
+
+First, define the \textit{kind} of a non-\lstinline!C_Value! \lstinline!ctype!
+as one of the following: integer-like, float-like, data-pointer-like, or
+function-pointer-like.
+
+The operation of casting from an expression of \lstinline!ctype! ``source''
+into type ``target'' is defined as below:
+
+\begin{enumerate}
+  \item If source and target are the same, nothing needs to be done;
+  \item If source is \lstinline!C_Value! and target is not, then we need to
+    unbox the expression. Assuming the cast is valid, then 
+    that
+\end{enumerate}
+
+This operation is 
+
 \subsection{\texttt{module Translate}: compilation from lambda IR to C AST}
 
 The implementation of \lstinline!Translate! is done via a recursive tree-walk
@@ -337,6 +472,9 @@ over the \lstinline!Lambda! tree. Three mutually recursive functions each
 target different types of C program fragment:
 
 TODO
+
+Note that each translation function also returns the C return type
+(\lstinline!C.ctype!) of the expression or statement. This is for the purposes of ``casting'', as defined earlier.
 
 Unfortunately the lambda IR is not documented anywhere, so the semantics
 of these instructions were divined through reverse engineering and code diving.
@@ -465,7 +603,13 @@ TODO
 
 TODO
 
+\subsubsection{Identifier legalisation}
+
 Not all OCaml identifiers are legal C identifiers. TODO
+
+\subsubsection{Typed identifier output}
+
+C outputs normal variables and function pointers in different styles. TODO
 
 \subsection{Driver modification}
 
@@ -493,8 +637,6 @@ Partial application and closures are discussed later in section \ref{closures}.
 TODO
 
 \subsection{Mutually recursive definitions}\label{mutually-recursive-values}
-
-TODO
 
 Consider the OCaml expression
 
@@ -535,6 +677,8 @@ b_1213[0] = 2;
 b_1213[1] = a_1213;
 \end{lstlisting}
 (TODO: fix this once list malloc typing works!)
+
+TODO
 
 \subsection{Imperative-style while loops}\label{while-loops}
 
@@ -654,34 +798,6 @@ void Foo__init() {
 \subsection{\texttt{Pmakeblock}}
 
 TODO
-
-\subsection{\texttt{structured\char`_constant}}
-
-TODO
-
-\section{NaN boxing}\label{nan-boxing}
-
-In order to support polymorphic comparisons, we need to use a technique to be
-able to distinguish pointers from immediate ints and doubles.
-
-We use a technique called NaN boxing. Inspired by the WebKit JSCore
-
-\begin{tabular}{c c | c c | c}
-    63..52 & 51..0 & 63..52 & 51..0 & purpose \\
-    \lstinline!fff! & \lstinline!0000000000000! & \lstinline!fff! & \lstinline!1000000000000! & Negative infinity \\
-    \lstinline!fff! & \lstinline!4000000000000! & \lstinline!fff! & \lstinline!5000000000000! & Negative signalling NaN (canonical) \\
-    \lstinline!fff! & \lstinline!8000000000000! & \lstinline!fff! & \lstinline!9000000000000! & Negative quiet NaN (canonical) \\
-    \lstinline!fff! & \lstinline!b000000000000! & \lstinline!fff! & \lstinline!c000000000000! & Integers (50-bit space) \\
-    \lstinline!fff! & \lstinline!effffffffffff! & \lstinline!fff! & \lstinline!fffffffffffff! & Integers (50-bit space) \\
-    \lstinline!fff! & \lstinline!f000000000000! & \lstinline!000! & \lstinline!0000000000000! & Pointers (48-bit space) \\
-    \lstinline!fff! & \lstinline!fffffffffffff! & \lstinline!000! & \lstinline!0ffffffffffff! & Pointers (48-bit space)
-\end{tabular}
-
-\subsection{50-bit integer arithmetic}\label{50-bit-integer}
-
-NaN boxing means that our integers are 50-bit sized. This is OK, because the size of the standard unboxed integer in OCaml is deliberately left unspecified -- the upstream compiler uses either 31-bit or 63-bit integers depending on the platform.
-
-Interestingly, using a non-word-sized integer
 
 \section{Exceptions}\label{exceptions}
 
@@ -893,7 +1009,7 @@ convention which programs and libraries adhere to. This includes the
 specification of the location in registers or memory where function arguments
 are passed.
 
-On POSIX compliant systems (this does not include Windows!) C uses AMD's x86-64
+On Unix-like systems\footnote{This does not include Windows!} C uses AMD's x86-64
 ABI. The first six arguments are passed in registers in a particular order,
 shown in the table below. Hence, when closing a function \lstinline!f! which
 originally took five or fewer arguments, there is space to pass \lstinline!env!
@@ -1267,6 +1383,9 @@ Limitations:
   \item ``Overapplication'' uncurrying
   \item Large parts of the standard library are unimplemented. Significantly \lstinline!Array!
   \item Inter-module function arity is unknown -- cannot partially apply or overapply (TODO: is this true?)
+  \item No liballocs type info for \lstinline!structured\char`_constant!
+  \item No polymorphic comparisons, but...
+
 \end{itemize}
 %TODO
 
