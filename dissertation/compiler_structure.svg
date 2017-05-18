@@ -1,0 +1,387 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created by diasvg.py -->
+
+<svg
+   xmlns:dc="http://purl.org/dc/elements/1.1/"
+   xmlns:cc="http://creativecommons.org/ns#"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   width="21.386236cm"
+   height="3.5649495cm"
+   viewBox="-0.05 7.95 21.36256 7.5012481"
+   version="1.1"
+   id="svg3906"
+   sodipodi:docname="compiler_structure.svg"
+   inkscape:version="0.92.1 r">
+  <metadata
+     id="metadata3912">
+    <rdf:RDF>
+      <cc:Work
+         rdf:about="">
+        <dc:format>image/svg+xml</dc:format>
+        <dc:type
+           rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
+        <dc:title></dc:title>
+      </cc:Work>
+    </rdf:RDF>
+  </metadata>
+  <defs
+     id="defs3910" />
+  <sodipodi:namedview
+     pagecolor="#ffffff"
+     bordercolor="#666666"
+     borderopacity="1"
+     objecttolerance="10"
+     gridtolerance="10"
+     guidetolerance="10"
+     inkscape:pageopacity="0"
+     inkscape:pageshadow="2"
+     inkscape:window-width="1185"
+     inkscape:window-height="680"
+     id="namedview3908"
+     showgrid="false"
+     fit-margin-top="0"
+     fit-margin-left="0"
+     fit-margin-right="0"
+     fit-margin-bottom="0"
+     inkscape:zoom="1.0176282"
+     inkscape:cx="432.45894"
+     inkscape:cy="55.672677"
+     inkscape:window-x="588"
+     inkscape:window-y="287"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg3906" />
+  <rect
+     x="-6.8683262"
+     y="8"
+     width="5"
+     height="1.9"
+     id="rect3816"
+     style="fill:#ffffff;stroke:none;stroke-width:0" />
+  <rect
+     x="-6.8683262"
+     y="8"
+     width="5"
+     height="1.9"
+     id="rect3818"
+     style="fill:#ffaaaa;stroke:#000000;stroke-width:0.1" />
+  <text
+     x="-4.3683262"
+     y="9.1450005"
+     font-size="0.80"
+     font-style="normal"
+     font-weight="400"
+     id="text3820"
+     style="font-style:normal;font-weight:400;font-size:0.80000001px;font-family:sans;text-anchor:middle;fill:#000000">Translate</text>
+  <rect
+     x="3.1316726"
+     y="8"
+     width="5"
+     height="1.9"
+     id="rect3822"
+     style="fill:#ffffff;stroke:none;stroke-width:0" />
+  <rect
+     x="3.1316726"
+     y="8"
+     width="5"
+     height="1.9"
+     id="rect3824"
+     style="fill:#ffaaaa;stroke:#000000;stroke-width:0.1" />
+  <text
+     x="5.6316743"
+     y="9.1450005"
+     font-size="0.80"
+     font-style="normal"
+     font-weight="400"
+     id="text3826"
+     style="font-style:normal;font-weight:400;font-size:0.80000001px;font-family:sans;text-anchor:middle;fill:#000000">Fixup</text>
+  <rect
+     x="13.131674"
+     y="8"
+     width="5"
+     height="1.9"
+     id="rect3828"
+     style="fill:#ffffff;stroke:none;stroke-width:0" />
+  <rect
+     x="13.131674"
+     y="8"
+     width="5"
+     height="1.9"
+     id="rect3830"
+     style="fill:#ffaaaa;stroke:#000000;stroke-width:0.1" />
+  <text
+     x="15.631674"
+     y="9.1450005"
+     font-size="0.80"
+     font-style="normal"
+     font-weight="400"
+     id="text3832"
+     style="font-style:normal;font-weight:400;font-size:0.80000001px;font-family:sans;text-anchor:middle;fill:#000000">Emitcode</text>
+  <rect
+     x="23.131674"
+     y="11"
+     width="5"
+     height="1.9"
+     id="rect3834"
+     style="fill:#ececec;stroke:none;stroke-width:0" />
+  <rect
+     x="23.131674"
+     y="11"
+     width="5"
+     height="1.9"
+     id="rect3836"
+     style="fill:none;stroke:#000000;stroke-width:0.1" />
+  <text
+     x="25.631672"
+     y="12.145"
+     font-size="0.80"
+     font-style="normal"
+     font-weight="400"
+     id="text3838"
+     style="font-style:normal;font-weight:400;font-size:0.80000001px;font-family:sans;text-anchor:middle;fill:#000000">C compiler</text>
+  <line
+     x1="-1.8683273"
+     y1="8.9499998"
+     x2="2.6446731"
+     y2="8.9499998"
+     id="line3840"
+     style="stroke:#000000;stroke-width:0.1" />
+  <polygon
+     points="14.888,8.95 14.388,9.2 14.513,8.95 14.388,8.7 "
+     id="polygon3842"
+     style="fill:#000000;stroke:none;stroke-width:0.1"
+     transform="translate(-11.868326)" />
+  <polygon
+     points="14.888,8.95 14.388,9.2 14.513,8.95 14.388,8.7 "
+     id="polygon3844"
+     style="fill:none;stroke:#000000;stroke-width:0.1"
+     transform="translate(-11.868326)" />
+  <line
+     x1="8.181673"
+     y1="8.9499998"
+     x2="12.644674"
+     y2="8.9499998"
+     id="line3846"
+     style="stroke:#000000;stroke-width:0.1" />
+  <polygon
+     points="24.888,8.95 24.388,9.2 24.513,8.95 24.388,8.7 "
+     id="polygon3848"
+     style="fill:#000000;stroke:none;stroke-width:0.1"
+     transform="translate(-11.868326)" />
+  <polygon
+     points="24.888,8.95 24.388,9.2 24.513,8.95 24.388,8.7 "
+     id="polygon3850"
+     style="fill:none;stroke:#000000;stroke-width:0.1"
+     transform="translate(-11.868326)" />
+  <line
+     x1="18.131674"
+     y1="8.9499998"
+     x2="22.681673"
+     y2="10.815"
+     id="line3852"
+     style="stroke:#000000;stroke-width:0.1" />
+  <polygon
+     points="34.897,10.958 34.339,10.999 34.55,10.815 34.529,10.537 "
+     id="polygon3854"
+     style="fill:#000000;stroke:none;stroke-width:0.1"
+     transform="translate(-11.868326)" />
+  <polygon
+     points="34.897,10.958 34.339,10.999 34.55,10.815 34.529,10.537 "
+     id="polygon3856"
+     style="fill:none;stroke:#000000;stroke-width:0.1"
+     transform="translate(-11.868326)" />
+  <line
+     x1="18.131674"
+     y1="11.95"
+     x2="22.644674"
+     y2="11.95"
+     id="line3858"
+     style="stroke:#000000;stroke-width:0.1" />
+  <polygon
+     points="34.888,11.95 34.388,12.2 34.513,11.95 34.388,11.7 "
+     id="polygon3860"
+     style="fill:#000000;stroke:none;stroke-width:0.1"
+     transform="translate(-11.868326)" />
+  <polygon
+     points="34.888,11.95 34.388,12.2 34.513,11.95 34.388,11.7 "
+     id="polygon3862"
+     style="fill:none;stroke:#000000;stroke-width:0.1"
+     transform="translate(-11.868326)" />
+  <line
+     x1="18.131674"
+     y1="15"
+     x2="22.682673"
+     y2="13.089"
+     id="line3864"
+     style="stroke:#000000;stroke-width:0.1" />
+  <polygon
+     points="34.897,12.943 34.533,13.367 34.551,13.089 34.339,12.906 "
+     id="polygon3866"
+     style="fill:#000000;stroke:none;stroke-width:0.1"
+     transform="translate(-11.868326)" />
+  <polygon
+     points="34.897,12.943 34.533,13.367 34.551,13.089 34.339,12.906 "
+     id="polygon3868"
+     style="fill:none;stroke:#000000;stroke-width:0.1"
+     transform="translate(-11.868326)" />
+  <text
+     x="17.86627"
+     y="15.232108"
+     font-size="0.80"
+     font-style="normal"
+     font-weight="400"
+     id="text3870"
+     style="font-style:normal;font-weight:400;font-size:0.80000001px;font-family:sans;text-anchor:start;fill:#000000">
+    <tspan
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Courier New';-inkscape-font-specification:'Courier New';text-align:end;text-anchor:end"
+       id="tspan3914">liballocs_runtime.c</tspan>
+  </text>
+  <text
+     x="4.1065998"
+     y="11.779208"
+     font-size="0.80"
+     font-style="normal"
+     font-weight="400"
+     id="text3872"
+     style="font-style:normal;font-weight:400;font-size:0.80000001px;font-family:sans;text-anchor:start;fill:#000000">
+    <tspan
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Courier New';-inkscape-font-specification:'Courier New'"
+       id="tspan3948">stdlib_liballocs/pervasives.c</tspan>
+  </text>
+  <text
+     x="4.1065998"
+     y="12.579207"
+     font-size="0.80"
+     font-style="normal"
+     font-weight="400"
+     id="text3874"
+     style="font-style:normal;font-weight:400;font-size:0.80000001px;font-family:sans;text-anchor:start;fill:#000000">
+    <tspan
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Courier New';-inkscape-font-specification:'Courier New'"
+       id="tspan3950">stdlib_liballocs/list.c</tspan>
+  </text>
+  <text
+     x="19.711943"
+     y="9.4689245"
+     font-size="0.80"
+     font-style="normal"
+     font-weight="400"
+     id="text3876"
+     style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:0.80000001px;font-family:'Courier New';-inkscape-font-specification:'Courier New';text-anchor:start;fill:#000000">
+    <tspan
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Courier New';-inkscape-font-specification:'Courier New'"
+       id="tspan3952">foo.c</tspan>
+  </text>
+  <line
+     x1="28.131672"
+     y1="11.95"
+     x2="32.644672"
+     y2="11.995"
+     id="line3878"
+     style="stroke:#000000;stroke-width:0.1" />
+  <polygon
+     points="44.888,11.999 44.386,12.244 44.513,11.995 44.391,11.744 "
+     id="polygon3880"
+     style="fill:#000000;stroke:none;stroke-width:0.1"
+     transform="translate(-11.868326)" />
+  <polygon
+     points="44.888,11.999 44.386,12.244 44.513,11.995 44.391,11.744 "
+     id="polygon3882"
+     style="fill:none;stroke:#000000;stroke-width:0.1"
+     transform="translate(-11.868326)" />
+  <text
+     x="28.319296"
+     y="11.961315"
+     font-size="0.80"
+     font-style="normal"
+     font-weight="400"
+     style="font-style:normal;font-weight:400;font-size:0.80000001px;font-family:sans;text-anchor:start;fill:#000000"
+     id="text3916" />
+  <text
+     x="9.3543644"
+     y="8.7773094"
+     font-size="0.80"
+     font-style="normal"
+     font-weight="400"
+     id="text3888"
+     style="font-style:normal;font-weight:400;font-size:0.80000001px;font-family:sans;text-anchor:start;fill:#000000">fixed</text>
+  <text
+     x="9.1316738"
+     y="9.6886549"
+     font-size="0.80"
+     font-style="normal"
+     font-weight="400"
+     id="text3890"
+     style="font-style:normal;font-weight:400;font-size:0.80000001px;font-family:sans;text-anchor:start;fill:#000000">C AST</text>
+  <text
+     x="-1.5363981"
+     y="8.7773094"
+     font-size="0.80"
+     font-style="normal"
+     font-weight="400"
+     id="text3892"
+     style="font-style:normal;font-weight:400;font-size:0.80000001px;font-family:sans;text-anchor:start;fill:#000000">extended</text>
+  <text
+     x="-0.86832726"
+     y="9.6886549"
+     font-size="0.80"
+     font-style="normal"
+     font-weight="400"
+     id="text3894"
+     style="font-style:normal;font-weight:400;font-size:0.80000001px;font-family:sans;text-anchor:start;fill:#000000">C AST</text>
+  <line
+     x1="-11.868326"
+     y1="9"
+     x2="-7.3553257"
+     y2="8.9549999"
+     id="line3896"
+     style="stroke:#000000;stroke-width:0.1" />
+  <polygon
+     points="4.888,8.951 4.391,9.206 4.513,8.955 4.386,8.706 "
+     id="polygon3898"
+     style="fill:#000000;stroke:none;stroke-width:0.1"
+     transform="translate(-11.868326)" />
+  <polygon
+     points="4.888,8.951 4.391,9.206 4.513,8.955 4.386,8.706 "
+     id="polygon3900"
+     style="fill:none;stroke:#000000;stroke-width:0.1"
+     transform="translate(-11.868326)" />
+  <text
+     x="-11.870436"
+     y="8.7773094"
+     font-size="0.80"
+     font-style="normal"
+     font-weight="400"
+     id="text3902"
+     style="font-style:normal;font-weight:400;font-size:0.80000001px;font-family:sans;text-anchor:start;fill:#000000">Lambda IR</text>
+  <text
+     x="-11.868505"
+     y="9.8000002"
+     font-size="0.80"
+     font-style="normal"
+     font-weight="400"
+     id="text3904"
+     style="font-style:normal;font-weight:400;font-size:0.80000001px;font-family:sans;text-anchor:start;fill:#000000">for <tspan
+   style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Courier New';-inkscape-font-specification:'Courier New'"
+   id="tspan3954">foo.ml</tspan>
+</text>
+  <text
+     xml:space="preserve"
+     style="font-style:normal;font-weight:normal;font-size:0.74230319px;line-height:0.77941835px;font-family:sans-serif;text-align:center;letter-spacing:0px;word-spacing:0px;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.05567274px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+     x="30.35737"
+     y="11.881456"
+     id="text3944"><tspan
+       sodipodi:role="line"
+       id="tspan3942"
+       x="30.35737"
+       y="11.881456"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Courier New';-inkscape-font-specification:'Courier New';stroke-width:0.05567274px">foo</tspan><tspan
+       sodipodi:role="line"
+       x="30.35737"
+       y="12.660874"
+       style="stroke-width:0.05567274px"
+       id="tspan3946">executable</tspan></text>
+</svg>

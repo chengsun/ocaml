@@ -75,7 +75,7 @@ Name:               & \bf Cheng Sun                       \\
 College:            & \bf Churchill College                     \\
 Project Title:      & \bf An observable OCaml via C and \texttt{liballocs} \\
 Examination:        & \bf Computer Science Tripos -- Part II, July 2017  \\
-Word Count:         & \bf 1587\footnotemark[1] \\
+Word Count:         & \bf 8614\footnotemark[1] \\
 Project Originator: & Stephen Kell                    \\
 Supervisor:         & Stephen Kell                    \\
 \end{tabular}
@@ -168,61 +168,63 @@ observing their behaviour at runtime.
         run on these platforms with minimal changes.
 \end{enumerate}
 
-The OCaml bytecode debugger, \lstinline{ocamldebug}, forms part of the core
-OCaml toolchain. One major problem is that \lstinline{ocamldebug} is unable to
-``see through'' polymorphism. For instance, suppose we would like to debug the
-following polymorphic list-reverse function, which has type
-\lml\lstinline{'a list -> 'a list}:
+TODO: select bits of project proposal introduction to insert here
 
-\begin{lstlisting}
-let my_rev lst =
-  match lst with
-  | [] -> []
-  | x::xs -> List.append xs [x]
-
-let result = my_rev [1; 2; 3]
-\end{lstlisting}\lnone
-
-Now let's try to debug the function with \lstinline{ocamldebug}.
-
-\begin{lstlisting}
-$ (!\aftergroup\bfseries!)ocamlc -g -o my_rev my_rev.ml(!\aftergroup\mdseries!)
-$ (!\aftergroup\bfseries!)ocamldebug my_rev(!\aftergroup\mdseries!)
-        OCaml Debugger version 4.02.3
-
-(ocd) (!\aftergroup\bfseries!)break @ My_rev 1(!\aftergroup\mdseries!)
-Loading program... done.
-Breakpoint 1 at 21600: file my_rev.ml, line 2, characters 3-62
-(ocd) (!\aftergroup\bfseries!)run(!\aftergroup\mdseries!)
-Time: 12 - pc: 21600 - module My_rev
-Breakpoint: 1
-2   <|b|>match lst with
-(ocd) (!\aftergroup\bfseries!)print lst(!\aftergroup\mdseries!)
-lst: 'a list = [<poly>; <poly>; <poly>]
-\end{lstlisting}
-
-Note that \lstinline{ocamldebug} is unable to display the contents of the input
-list, as it does not know the concrete type that the type variable
-\lstinline{'a} is instantiated with for this invocation.
-
-There are many other deficiencies with the OCaml debugger, mostly stemming from
-its immaturity and lack of features. These issues mean that when debugging
-OCaml code, one often has to resort to ``printf debugging'' instead.
-
-The aim of this project is to investigate whether the experience of debugging
-and observing the runtime behaviour of OCaml programs could be improved by
-utilising the mature C toolchain. My goal is to write a translator that
-compiles OCaml code into equivalent C code, whilst maintaining a well-defined
-mapping between the two (in terms of variable names, types, and so on). A user
-will then be able to debug their OCaml program by using (perhaps an augmented)
-\lstinline{gdb} on the generated C code.
-
-In order to solve the problem of ``seeing through'' polymorphism, I will use a
-library written by my supervisor, \lstinline{liballocs}, which keeps track of
-runtime allocation metadata (including their types) with low overhead. This
-will allow the debugger to inspect the allocation corresponding to the input to
-\lstinline{my_rev}, for instance, and conclude that it is operating on lists
-with elements of type \lc\lstinline{int}\lnone.
+%The OCaml bytecode debugger, \lstinline{ocamldebug}, forms part of the core
+%OCaml toolchain. One major problem is that \lstinline{ocamldebug} is unable to
+%``see through'' polymorphism. For instance, suppose we would like to debug the
+%following polymorphic list-reverse function, which has type
+%\lml\lstinline{'a list -> 'a list}:
+%
+%\begin{lstlisting}
+%let my_rev lst =
+%  match lst with
+%  | [] -> []
+%  | x::xs -> List.append xs [x]
+%
+%let result = my_rev [1; 2; 3]
+%\end{lstlisting}\lnone
+%
+%Now let's try to debug the function with \lstinline{ocamldebug}.
+%
+%\begin{lstlisting}
+%$ (!\aftergroup\bfseries!)ocamlc -g -o my_rev my_rev.ml(!\aftergroup\mdseries!)
+%$ (!\aftergroup\bfseries!)ocamldebug my_rev(!\aftergroup\mdseries!)
+%        OCaml Debugger version 4.02.3
+%
+%(ocd) (!\aftergroup\bfseries!)break @ My_rev 1(!\aftergroup\mdseries!)
+%Loading program... done.
+%Breakpoint 1 at 21600: file my_rev.ml, line 2, characters 3-62
+%(ocd) (!\aftergroup\bfseries!)run(!\aftergroup\mdseries!)
+%Time: 12 - pc: 21600 - module My_rev
+%Breakpoint: 1
+%2   <|b|>match lst with
+%(ocd) (!\aftergroup\bfseries!)print lst(!\aftergroup\mdseries!)
+%lst: 'a list = [<poly>; <poly>; <poly>]
+%\end{lstlisting}
+%
+%Note that \lstinline{ocamldebug} is unable to display the contents of the input
+%list, as it does not know the concrete type that the type variable
+%\lstinline{'a} is instantiated with for this invocation.
+%
+%There are many other deficiencies with the OCaml debugger, mostly stemming from
+%its immaturity and lack of features. These issues mean that when debugging
+%OCaml code, one often has to resort to ``printf debugging'' instead.
+%
+%The aim of this project is to investigate whether the experience of debugging
+%and observing the runtime behaviour of OCaml programs could be improved by
+%utilising the mature C toolchain. My goal is to write a translator that
+%compiles OCaml code into equivalent C code, whilst maintaining a well-defined
+%mapping between the two (in terms of variable names, types, and so on). A user
+%will then be able to debug their OCaml program by using (perhaps an augmented)
+%\lstinline{gdb} on the generated C code.
+%
+%In order to solve the problem of ``seeing through'' polymorphism, I will use a
+%library written by my supervisor, \lstinline{liballocs}, which keeps track of
+%runtime allocation metadata (including their types) with low overhead. This
+%will allow the debugger to inspect the allocation corresponding to the input to
+%\lstinline{my_rev}, for instance, and conclude that it is operating on lists
+%with elements of type \lc\lstinline{int}\lnone.
 
 
 \chapter{Preparation}
@@ -246,10 +248,8 @@ The compiler represents the name of all variables as \lstinline!Ident.t!, which
 is conceptually a tuple of the variable name string and a unique integer. Each
 let binding is given its own unique \lstinline!Ident.t! -- once the frontend
 has resolved variables using OCaml's scoping and shadowing rules, the rest of
-the compiler has the guarantee of globally unique\footnote{Up to module
-boundary -- at the \lstinline!Lambda! level intermodule variable references
-have already boiled down to record field accesses -- see section
-\ref{inter-module-references}.} identifier names.
+the compiler has the guarantee of globally unique\footnote{Within a particular
+module.} identifier names.
 
 A \lstinline!type_expr! represents the OCaml type of a particular expression.
 
@@ -279,36 +279,33 @@ significantly desugars pattern matching into elementary conditionals and
 destructuring operations. Also class and module constructs are compiled down to
 records.
 
-Notably this pass does NOT provide:
-
+Notably this pass does NOT:
 \begin{itemize}
-    \item type preservation -- see section \ref{type-information-for-liballocs}
-    \item closure conversion -- see section \ref{closures}
-    \item uncurrying\footnote{Significantly for us this means
+    \item preserve type information from \lstinline!Typedtree! -- see section \ref{type-information-for-liballocs};
+    \item perform closure conversion -- see section \ref{closures};
+    \item perform uncurrying\footnote{Significantly for us this means
         partial applications and ``overapplications'' are not converted into
-        complete applications} -- see section \ref{closures-compiler-support}
+        complete applications.} -- see section \ref{closures-compiler-support}.
 \end{itemize}
 
-\subsection{Introduction to \texttt{Lambda}}
+\subsection{Introduction to \texttt{Lambda}}\label{introduction-to-lambda}
 
 Each OCaml file implicitly defines a module, whose name is the same as the
-filename capitalised. For instance, \lstinline!test.ml! defines a module named
-\lstinline!Test!.
+filename capitalised. For instance, \lstinline!foo.ml! defines a module named
+\lstinline!Foo!.
 
-At the core language level\footnote{That is, ignoring the module sublanguage.},
-every toplevel statement must be a let-statement. However, there are two
-different types. Let-statements which define functions have bodies should not
-be executed immediately -- only when the function is called. All other
-let-statements should run exactly once when the module is loaded for the first
-time. For instance:
+At the toplevel, there are two different types of let statement. Let-statements
+which define functions have bodies should not be executed immediately -- only
+when the function is called. All other let-statements should run exactly once
+when the module is loaded for the first time. For instance:
 \lml\begin{lstlisting}
-(* function -- not run immediately *)
+(* function -- not run immediately, exported *)
 let foo () = [ 3 ; 2 ; 1 ]
 
-(* ignored result -- run immediately *)
+(* ignored result -- run immediately, discarded *)
 let _ = foo ()
 
-(* variable -- run immediately *)
+(* variable -- run immediately, exported *)
 let bar = List.sort (-) (foo ())\end{lstlisting}\lnone
 
 This will get translated into the following (abridged) \lstinline!Lambda! code.
@@ -361,30 +358,26 @@ There are several things to note about the \lstinline!lambda! tree produced.
   \item On line 7, the \lstinline!foo! function is applied using
     \lstinline!Lapply!, which takes a record containing (amongst other things)
     the function and the arguments to apply.
-  \item On line 13, \lstinline!List.sort! is applied. Note how inter-module
-    references are represented as \lstinline!Pfield! accesses (effectively an
-    array index) from a globally defined module object
-    -- as described below in \ref{inter-module-references}.
+  \item On lines 13--19, \lstinline!List.sort! is applied. Note how this requires
+    accessing the globally defined \lstinline!List! module object. Also
+    note that nowhere does the name ``\lstinline!sort!'' appear.
+
+    The OCaml compiler compiles modules to records at the \lstinline!Lambda!
+    level. These are stored as blocks of contiguous word-sized values, and are
+    indexed into by an integer offset (using the \lstinline!Pfield! primitive). The
+    order of values in the record is well defined by the OCaml compiler, so that
+    other modules that link against it know the mapping from exported variable
+    name to field offset.
+
+    In this case the compiler knew that \lstinline!List.sort! was the 40th exported
+    variable in the \lstinline!List! module.
   \item Line 20 constructs the ``return value'' of the \lstinline!lambda!
-    expression. This is a module object which is reexported globally under the
-    module's name.
+    expression. This is a record, representing the currently compiled module
+    object, which contains the variables and functions that the module exports.
+
+    Note that not all variables and functions are necessarily exported --
+    exports can be restricted by the \texttt{.mli} file if present.
 \end{enumerate}
-
-\subsection{Inter-module references}\label{inter-module-references}
-
-Each \lstinline!.ml! file in OCaml implicitly defines a toplevel module. The
-representation the OCaml compiler compiles moules to at the \lstinline!Lambda!
-level is as an ``array''\footnote{Technically a record, which is stored as a
-block of contiguous word-sized values, and can be indexed into by integer
-offset.} of values, the order of which is defined by the OCaml compiler (likely
-based on the order of values in the \texttt{.mli} interface file).
-
-At the lambda IR all inter-modular value/function accesses have already been
-lowered to \lstinline!getfield! operations on module objects. For instance, a
-call to \lstinline!Foo.bar! will already be represented by something like
-\lstinline!getfield Foo 1!. The ordering of values in modules is determined by
-the OCaml compiler based on the module's interface (\lstinline!.mli! file if it
-exists). This scheme implicitly handles data abstraction for us.
 
 \section{Investigating C AST representations and printing}
 
@@ -399,13 +392,22 @@ However, I came to the conclusion that this wouldn't be a good fit for my projec
  performed on this. On the other hand I'd like to represent the useful subset
  of C which I can use to compile OCaml constructs to.
 
+In addition, I anticipated that I may need fine-grained control, or custom
+features, to be represented in my AST. Hence I ended up going with a hand-rolled
+representation.
 
-\section{Investigating closure possibilities}
 
-Supporting closures in C is one of the first identified difficulty points.
-Some preliminary investigation was done towards possible external libraries
-that could be used to implement them. One of these, \lstinline!libffi!,
-was suggested by my supervisor.
+\section{Investigating closure support in C}
+
+Supporting closures in C was one of the earliest identified points of difficulty.
+Early on my supervisor recommended that I look at the approach introduced by
+Breuel \cite{breuel88}. After reading and understanding the paper I had a
+better understanding of the problem and was fairly confident I could implement
+the proposed solution.
+
+Even so, some preliminary investigation was done towards possible external
+libraries that could be used to provide this support for me. One of these,
+\lstinline!libffi!, was also suggested by my supervisor.
 
 However, I came to the conclusion that \lstinline!libffi!'s API was too generic
 and complex for the very specific use case that I had in mind. In addition, I
@@ -422,6 +424,8 @@ modifications required. Given an arbitrary valid pointer, \lstinline!liballocs!
 can return information about the start and the extend of the corresponding
 allocated block, and also the C type of the allocation.
 
+As the library and toolchain were designed to be drop-in replacements for gcc or
+clang, I didn't spend very much preliminary time studying the library.
 
 \chapter{Implementation}
 
@@ -559,7 +563,7 @@ Refer to (appendix -- section TODO) for the complete datatype definition.
 In the produced C code, \lstinline!ocaml_value_t! is a type which is capable of
 representing any OCaml value. This type corresponds to the \lstinline!C_Value!
 datatype in my compiler. This type is required to represent polymorphic OCaml
-types: for instance a function with a parameter of OCaml type \lml\lstinline!'a!\lnone
+types: for instance a function with a parameter of OCaml type \lml\lstinline!'a!\lnone{}
 would take a C parameter of type \lstinline!ocaml_value_t!.\footnote{As it
 turns out, it's easier to represent \textit{all} OCaml values as values of this
 type, not just polymorphic ones.}
@@ -621,6 +625,8 @@ non-zero mantissa is a NaN value. There are only four different NaNs: plus or
 minus quiet ($\pm$qNaN) and signalling ($\pm$sNaN). Modern CPUs only ever use
 one specific (canonical) bit representation for each type of NaN, which leaves
 the rest of the range to embed other types of values into.
+
+TODO: fix this table!
 
 \begin{tabular}{c c | c c | c}
     63..52 & 51..0 & 63..52 & 51..0 & purpose \\
@@ -753,6 +759,8 @@ into type ``target'' is defined as below:
   \item Otherwise use a C cast to the target type.
 \end{enumerate}
 
+TODO: mention why we need this operation\dots
+
 \section{\texttt{module Translate}: compilation from lambda IR to C AST}
 
 The implementation of \lstinline!Translate! is done via a recursive tree-walk
@@ -863,6 +871,8 @@ See section \ref{module-fixup} for more details.
 \begin{lstlisting}
 let x = (fun x -> x + 1) 2
 \end{lstlisting}
+
+TODO
 
 \section{\texttt{module Fixup}: translation from extended-C AST to valid C AST}\label{module-fixup}
 
@@ -1072,11 +1082,12 @@ TODO
 
 \section{Inter-module linking}
 
-Recall from section \ref{inter-module-references} that inter-module references
+Recall from section \ref{introduction-to-lambda} that inter-module references
 (such as \lstinline!List.sort!) are compiled to record field accesses at the
 \lstinline!Lambda! level. The top-level module constructor of the currently
 compiled module returns a block which represents the record to be exported to
-other modules.
+other modules. Conveniently, this scheme implicitly handles data abstraction
+for us.
 
 The way that we translate this concept to C is by representing a module
 \lstinline!foo! as a C compilation unit \lstinline!foo.c! exposing the following:
@@ -1604,7 +1615,14 @@ which runs twelve versions of each benchmark:
     \item Native code generated by \lstinline!clang! via my OCaml-to-C compiler, at each of four optimisation levels.
 \end{itemize}
 
-I used R and ggplot2 to process and graph the results, learning the language and library from scratch.
+The results are processed and graphed using R and ggplot2. I had to learn this
+language and library from scratch, but it turned out to be a powerful tool for
+processing the large amounts of CSV data my benchmarking script generates.
+
+\begin{center}
+  \includegraphics[width=15cm]{resultsummary-b477d4580}
+  TODO: move me!
+\end{center}
 
 My benchmarks broadly fall into one of three categories.
 
