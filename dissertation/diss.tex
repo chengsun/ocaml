@@ -7,6 +7,7 @@
 \usepackage{docmute}   % only needed to allow inclusion of proposal.tex
 \usepackage{amsmath}
 
+\usepackage[nottoc,notlot,notlof]{tocbibind} % get the bibliography to be listed in the ToC as an unnumbered sectional unit
 
 \usepackage[usenames,dvipsnames,svgnames,table]{xcolor}         % X11 colour names
 \usepackage{listings}       % Source code listings
@@ -385,13 +386,41 @@ call to \lstinline!Foo.bar! will already be represented by something like
 the OCaml compiler based on the module's interface (\lstinline!.mli! file if it
 exists). This scheme implicitly handles data abstraction for us.
 
+\section{Investigating C AST representations and printing}
+
+My compiler is required to output C code, so a way was required to represent C
+as a syntax tree that can be easily manipulated. My supervisor suggested the
+use of \lstinline!cil!, a C ``intermediate language'' which is capable of
+semantically representing all C programs using a minimised subset of the language.
+
+However, I came to the conclusion that this wouldn't be a good fit for my project, because
+ CIL is, in a sense, trying to accomplish the opposite of what I want. CIL
+ tries to represent a minimal subset of C, and allow transformations to be
+ performed on this. On the other hand I'd like to represent the useful subset
+ of C which I can use to compile OCaml constructs to.
+
+
 \section{Investigating closure possibilities}
 
-TODO
+Supporting closures in C is one of the first identified difficulty points.
+Some preliminary investigation was done towards possible external libraries
+that could be used to implement them. One of these, \lstinline!libffi!,
+was suggested by my supervisor.
+
+However, I came to the conclusion that \lstinline!libffi!'s API was too generic
+and complex for the very specific use case that I had in mind. In addition, I
+wasn't sure whether the library would give me enough control. Finally, I wanted
+to take on the challenge of implementing closures myself, so that I could gain
+a better understanding of the technique.
 
 \section{\texttt{liballocs}}
 
-\lstinline!liballocs! is TODO
+\lstinline!liballocs! is a C library (and accompanying toolchain wrapper)
+written and maintained by my supervisor, Stephen Kell. The library transparently
+keeps track of the sizes and types of all allocated memory, with no
+modifications required. Given an arbitrary valid pointer, \lstinline!liballocs!
+can return information about the start and the extend of the corresponding
+allocated block, and also the C type of the allocation.
 
 
 \chapter{Implementation}
@@ -399,27 +428,30 @@ TODO
 \section{Summary and structure of code}
 
 \begin{enumerate}
-  \item the driver
-  \item the compilation module
-    \begin{enumerate}
-      \item AST
-      \item translate
-      \item fixup
-      \item emitcode
-    \end{enumerate}
+  \item the modified driver (\lstinline!driver/compile.ml! -- section\ref{modified-compiler-driver})
+  \item the C compilation stage (\lstinline!bytecomp/liballocs.ml! -- section \ref{module-c})
   \item the runtime
     \begin{enumerate}
-      \item OCaml standard library
-      \item C runtime library
+      \item OCaml standard library (\lstinline!stdlib_liballocs!)
+      \item C runtime library (\lstinline!liballocs_runtime.c!)
     \end{enumerate}
+  \item build script (\lstinline!build_liballocs.sh! -- section \ref{build-process})
+  \item test script (\lstinline!run_tests.sh! -- section \ref{regression-testing})
+  \item benchmark scripts (\lstinline!benchmark.sh! and \lstinline!plot.r! -- section \ref{benchmarks})
 \end{enumerate}
 
 My runtime is implemented assuming a fairly particular setup. A 64-bit
-Linux environment is required, with the \lstinline!liballocs! library. TODO Elaborate?
+Linux environment is required, due to my value representation (section
+\ref{value-representation}) and closure implementation (section
+\ref{closures}).
 
-The stages of my C compiler backend are as follows. TODO
+The stages of my C compiler backend are as follows:
 
-\subsection{\texttt{module C}: the extended C abstract syntax tree datatype}
+\begin{center}
+  \includegraphics[width=16cm]{compiler_structure}
+\end{center}
+
+\subsection{\texttt{module C}: the extended C abstract syntax tree datatype}\label{module-c}
 
 I have defined a datatype representing a C-like syntax tree. Not all C features
 are modelled -- only the constructs that my compiler needs to produce.
@@ -707,11 +739,12 @@ into type ``target'' is defined as below:
 \begin{enumerate}
   \item If source and target are the same, nothing needs to be done;
   \item If source is \lstinline!C_Value! and target is not, then we need to
-    unwrap the expression. Assuming the cast is valid, then 
-    that
+    unwrap the expression. Assuming the cast is valid, then use the appropriate
+    \lstinline!GET_*! macro to retrieve the original value;
+  \item If target is \lstinline!C_Value! and source is not, then we need to
+    wrap the expression using the appropriate \lstinline!NEW_*! macro;
+  \item Otherwise use a C cast to the target type.
 \end{enumerate}
-
-This operation is 
 
 \subsection{\texttt{module Translate}: compilation from lambda IR to C AST}
 
@@ -867,7 +900,7 @@ Not all OCaml identifiers are legal C identifiers. TODO
 
 C outputs normal variables and function pointers in different styles. TODO
 
-\subsection{Driver modification}
+\subsection{Modified compiler driver}\label{modified-compiler-driver}
 
 Support was added to the \lstinline!ocamlc! driver binary to generate and
 output C code. A new flag \lstinline!-target-liballocs! was added. After the
@@ -875,9 +908,11 @@ simplified lambda IR is generated as usual, the presence of this flag will
 trigger the additional phase of compiling and outputting the C code in addition
 to running the rest of the compiler pipeline.
 
-\section{Build and test scripts}
+\section{Build process}\label{build-process}
 
 TODO
+
+Also see \ref{module-list}.
 
 
 \section{Basic constructs}
@@ -1476,7 +1511,7 @@ code is during tthe linking stage: the user's generated C code is linked
 against the generated C code of the \lstinline!Pervasives! and \lstinline!List!
 modules.
 
-\section{Regression testing}
+\section{Regression testing}\label{regression-testing}
 
 As new features have been implemented in the compiler, I've been writing small
 tests which ensure the correct functionality of that part of the compiler. In
@@ -1544,7 +1579,7 @@ A selection of illustrative tests, and the C code produced, is given below.
     \item \textbf{\texttt{overapplication}}: TODO
 \end{enumerate}
 
-\section{Benchmarks}
+\section{Benchmarks}\label{benchmarks}
 
 My benchmarking methodology relies on a shell script \lstinline!benchmark.sh!,
 which runs twelve versions of each benchmark:
@@ -1663,6 +1698,41 @@ This makes heavy use of both integer and floating point arithmetic (\lstinline!l
 
 \chapter{Conclusion}\label{conclusion}
 
+The project was technically challenging, as I had to work with an unfamiliar
+compiler's internals, as well as implementing a new backend from scratch.
+
+My original motivations for this project were the following:
+\begin{enumerate}
+    \item \textbf{Feasibility}: my project was completely successful in
+      demonstrating that compiling OCaml into C code is a feasible task. Many
+      OCaml constructs are already supported, and the ones that are not
+      (detailed below) were mostly omitted due to time constraints, rather than
+      technical ones;
+    \item \textbf{Performance}: despite not worrying specifically about
+      generating performant C code in my compiler, the benchmarks show that
+      the compiled C executables already perform competitively -- matching or
+      exceeding OCaml bytecode performance in most cases, when closure creation
+      doesn't dominate runtime;
+    \item \textbf{Observability}: TODO;
+    \item \textbf{Portability}: my implementation in its current state has two
+      parts which hinder portability by assuming the generated code is being
+      run on 64-bit Linux:
+      \begin{itemize}
+        \item
+          My value representation (section \ref{value-representation}) assumes
+          64-bit sized registers so that each value fits in a register.
+          In fact, this is not actually a portability problem as it will still
+          work on 32-bit target, just somewhat inefficiently;
+        \item The closure implementation on the other hand does currently have a hard
+          dependency on 64-bit Linux, due to the fact that the hardcoded
+          sequence of opcodes is specific to this CPU and ABI. Because of this
+          I somewhat regret my choice of implementing closures from scratch --
+          if I had taken advantage of a widely-ported library such as
+          \lstinline!libffi!, then portability would have been completely
+          achievable.
+      \end{itemize}
+\end{enumerate}
+
 Limitations:
 
 \begin{itemize}
@@ -1679,7 +1749,6 @@ Limitations:
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % the bibliography
-\addcontentsline{toc}{chapter}{Bibliography}
 \begin{thebibliography}{1}
 
 \bibitem{breuel88}
