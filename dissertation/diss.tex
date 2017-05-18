@@ -127,8 +127,6 @@ extent for a comparable purpose.
 
 \tableofcontents
 
-\listoffigures
-
 \newpage
 \section*{Acknowledgements}
 
@@ -144,14 +142,97 @@ extent for a comparable purpose.
 
 \chapter{Introduction}
 
-%TODO
+OCaml is one of the most commonly used members of the ML family of functional
+languages. It is popular for its expressivity, type system and performance.
+However, there is not as of yet a good story for debugging OCaml programs, and
+observing their behaviour at runtime.
+
+\begin{enumerate}
+    \item \textbf{Feasibility}: it would be nice to know whether it is
+        technically possible to compile from OCaml code to C. In particular OCaml's
+        \lstinline!Lambda! Intermediate Representation is a fairly flexible and
+        expressive target, which is garnering increased attention as a possible
+        target IR for compiler frontends of other languages \cite{dolan16};
+    \item \textbf{Performance}: C has very mature toolchains that have been
+        refined and optimised over tens of years. It would be nice to leverage
+        the optimisations that the GCC and Clang compilers can provide for
+        free;
+    \item \textbf{Observability}: gdb is a very mature debugger for C, which
+        far surpasses OCaml's in power;
+    \item \textbf{Portability}: C can be compiled on a diverse range of
+        platforms. It would be nice to know that OCaml code could theoretically
+        run on these platforms with minimal changes.
+\end{enumerate}
+
+The OCaml bytecode debugger, \lstinline{ocamldebug}, forms part of the core
+OCaml toolchain. One major problem is that \lstinline{ocamldebug} is unable to
+``see through'' polymorphism. For instance, suppose we would like to debug the
+following polymorphic list-reverse function, which has type
+\lstinline{'a list -> 'a list}:
+
+\begin{lstlisting}
+let my_rev lst =
+  match lst with
+  | [] -> []
+  | x::xs -> List.append xs [x]
+
+let result = my_rev [1; 2; 3]
+\end{lstlisting}
+
+Now let's try to debug the function with \lstinline{ocamldebug}.
+
+\begin{lstlisting}
+$ (*\aftergroup\bfseries*)ocamlc -g -o my_rev my_rev.ml(*\aftergroup\mdseries*)
+$ (*\aftergroup\bfseries*)ocamldebug my_rev(*\aftergroup\mdseries*)
+        OCaml Debugger version 4.02.3
+
+(ocd) (*\aftergroup\bfseries*)break @ My_rev 1(*\aftergroup\mdseries*)
+Loading program... done.
+Breakpoint 1 at 21600: file my_rev.ml, line 2, characters 3-62
+(ocd) (*\aftergroup\bfseries*)run(*\aftergroup\mdseries*)
+Time: 12 - pc: 21600 - module My_rev
+Breakpoint: 1
+2   <|b|>match lst with
+(ocd) (*\aftergroup\bfseries*)print lst(*\aftergroup\mdseries*)
+lst: 'a list = [<poly>; <poly>; <poly>]
+\end{lstlisting}
+
+Note that \lstinline{ocamldebug} is unable to display the contents of the input
+list, as it does not know the concrete type that the type variable
+\lstinline{'a} is instantiated with for this invocation.
+
+There are many other deficiencies with the OCaml debugger, mostly stemming from
+its immaturity and lack of features. These issues mean that when debugging
+OCaml code, one often has to resort to ``printf debugging'' instead.
+
+The aim of this project is to investigate whether the experience of debugging
+and observing the runtime behaviour of OCaml programs could be improved by
+utilising the mature C toolchain. My goal is to write a translator that
+compiles OCaml code into equivalent C code, whilst maintaining a well-defined
+mapping between the two (in terms of variable names, types, and so on). A user
+will then be able to debug their OCaml program by using (perhaps an augmented)
+\lstinline{gdb} on the generated C code.
+
+In order to solve the problem of ``seeing through'' polymorphism, I will use a
+library written by my supervisor, \lstinline{liballocs}, which keeps track of
+runtime allocation metadata (including their types) with low overhead. This
+will allow the debugger to inspect the allocation corresponding to the input to
+\lstinline{my_rev}, for instance, and conclude that it is operating on lists
+with elements of type \lstinline{int}.
 
 
 \chapter{Preparation}
 
+Before starting the project, I was fairly comfortable with both the OCaml and
+C languages. However, I had no experience with the OCaml compiler codebase, nor
+indeed any experience in working on a project as large as it.
+
 \section{The OCaml compiler}
 
-The vast majority of my code will be written as part of the OCaml compiler. The compiler is itself written in OCaml, and is a large and complex code base developed over the course of over 20 years, consisting of 197k lines of OCaml and 42k lines of C.\footnote{As counted by the \lstinline!cloc! tool.}
+The vast majority of my code will be written to be built as part of the OCaml
+compiler. The compiler is itself written in OCaml, and is a large and complex
+code base developed over the course of over 20 years, consisting of 197k lines
+of OCaml and 42k lines of C.\footnote{As counted by the \lstinline!cloc! tool.}
 
 The OCaml compiler processes OCaml code in several phases:
 
@@ -1470,6 +1551,11 @@ Limitations:
   WebKit authors,
   \emph{JSValue.h}
   \url{https://github.com/WebKit/webkit/blob/master/Source/JavaScriptCore/runtime/JSCJSValue.h}
+
+\bibitem{dolan16}
+  Stephen Dolan,
+  \emph{Malfunctional Programming},
+  ML Workshop, 2016.  \\ \url{https://www.cl.cam.ac.uk/~sd601/papers/malfunction.pdf}
 
 \end{thebibliography}
 
