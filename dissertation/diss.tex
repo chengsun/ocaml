@@ -315,23 +315,23 @@ This will get translated into the following (abridged) \lstinline!Lambda! code.
 Lseq (
   Lprim (Popaque, [ Lprim (Pgetglobal, [ "List" ]) ]),
   Llet (
-    foo/1199,
-    Lfunction ([ param/1255 ], ...),
+    foo_1199,
+    Lfunction ([ param_1255 ], ...),
     Lseq (
       Lapply {
-        ap_func = foo/1199,
+        ap_func = foo_1199,
         ap_args = [ Lconst (Const_base (Const_pointer 0)) ]
       },
       Llet (
-        bar/1200,
+        bar_1200,
         Lapply {
           ap_func =
-            Lprim (Pgetfield 40, [
+            Lprim (Pfield 40, [
               Lprim (Pgetglobal, [ "List" ])
             ]),
           ap_args = [ ... ]
         },
-        Lprim (Pmakeblock (0, Immutable), [foo/1199, bar/1200])
+        Lprim (Pmakeblock (0, Immutable), [foo_1199, bar_1200])
       )
     )
   )
@@ -348,6 +348,9 @@ There are several things to note about the \lstinline!lambda! tree produced.
     in contrast to a more imperative style \lstinline!var ...; var ...;!.
     Note that although one does not write the \lml\lstinline!in!\lnone{} keyword
 		at the top-level, under the hood it desugars to this form regardless.
+  \item All variable references are represented using \lstinline!Ident.t! (see
+    \ref{common-types}), denoted here using an underscore between name and numeric
+    identifier.
   \item On line 6 of the output, it can be seen that the
     \lml\lstinline!let _ = ...!\lnone{} construct desugars to the \lstinline!Lseq(l1, l2)!
     constructor, which is used to represent the imperative \lstinline!;! operator.
@@ -358,8 +361,12 @@ There are several things to note about the \lstinline!lambda! tree produced.
     \lstinline!Lapply!, which takes a record containing (amongst other things)
     the function and the arguments to apply.
   \item On line 13, \lstinline!List.sort! is applied. Note how inter-module
-    references are represented as field accesses inside a global module object
+    references are represented as \lstinline!Pfield! accesses (effectively an
+    array index) from a globally defined module object
     -- as described below in \ref{inter-module-references}.
+  \item Line 20 constructs the ``return value'' of the \lstinline!lambda!
+    expression. This is a module object which is reexported globally under the
+    module's name.
 \end{enumerate}
 
 \subsection{Inter-module references}\label{inter-module-references}
