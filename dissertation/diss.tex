@@ -578,13 +578,13 @@ access each variable is very slow. Another is that boxing small types, such as
 integers, requires twice as much memory -- one word-sized integer on the heap
 and the word-sized pointer to it.
 
-Because of this, my \lstinline!ocaml_value_t! representation is actually
-capable of storing some types of value unboxed. We would still like
+Because of this, I decided to make my \lstinline!ocaml_value_t! representation
+capable of storing some types of value unboxed. However, we would still like
 \lstinline!ocaml_value_t! to be exactly 64-bits in size, so that it fits into a
-register. A technique is needed to fit both pointers and \textit{immediates}
-(unboxed values such as integers and floating point numbers) into such a
-word-sized type. Various such techniques have been used over the years by
-high-performance compilers and interpreters:
+register. A technique is needed to squeeze both pointers and \textit{immediates}
+(unboxed values such as integers and floating point numbers) into just 64 bits.
+Various such techniques have been used over the years by high-performance
+compilers and interpreters:
 \begin{enumerate}
   \item \textbf{untagged values}, as used by the D programming language, for
     example. This ``technique'' simply represents each type of value as itself.
@@ -613,6 +613,11 @@ high-performance compilers and interpreters:
 \end{enumerate}
 
 \subsection{NaN boxing}\label{nan-boxing}
+
+NaN boxing is a very surprising technique which can be used to achieve several things that we want:
+\begin{enumerate}
+    \item TODO
+\end{enumerate}
 
 NaN boxing allows us to represent doubles unboxed. Our implementation of NaN
 boxing was inspired by JavaScriptCore's \cite{jscore}, however the exact choice
@@ -711,15 +716,24 @@ standard unboxed integer is deliberately left unspecified -- in fact the
 upstream compiler uses either 31-bit or 63-bit integers depending on the
 platform.
 
-Interestingly, most native word-sized arithmetic operations work correctly on non-word-sized integers, due to the properties of modular arithmetic and twos complement representation. For instance, consider two 50-bit integers stored in 64-bit registers, with arbitrary values for the top 14 bits. A 64-bit multiply of the two registers will generate the correct answer in the bottom 50 bits of the resulting register.
+Interestingly, most native word-sized arithmetic operations work correctly on
+non-word-sized integers, due to the properties of modular arithmetic and twos
+complement representation. For instance, consider two 50-bit integers stored in
+64-bit registers, with arbitrary values for the top 14 bits. A 64-bit multiply
+of the two registers will generate the correct answer in the bottom 50 bits of
+the resulting register.
 
-The only cases where non-word sized integers need careful treatment are operations where more significant bits in the input can influence less significant bits in the output, such as the right shift and divide operations. OCaml has two shifts:
+The only cases where non-word sized integers need careful treatment are
+operations where more significant bits in the input can influence less
+significant bits in the output, such as the right shift and divide operations.
+OCaml has two shifts:
 \begin{itemize}
   \item logical shift, where the shifted-in bits are set to zero;
   \item arithmetic shift, where the shifted-in bits are set to the sign bit.
 \end{itemize}
 
-Logical right shift (lsr) is relatively simple -- first set the top 14 bits to zero by using a mask, then perform a native-width logical right shift.
+Logical right shift (lsr) is relatively simple -- first set the top 14 bits to
+zero by using a mask, then perform a native-width logical right shift.
 
 Arithmetic right shift (asr) and division are trickier. We first need to
 ``clean up'' the top 14 bits by extending our real sign bit (bit 49) into them.
