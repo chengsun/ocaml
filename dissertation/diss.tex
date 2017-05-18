@@ -8,6 +8,7 @@
 \usepackage{amsmath}
 
 
+\usepackage[usenames,dvipsnames,svgnames,table]{xcolor}         % X11 colour names
 \usepackage{listings}       % Source code listings
 \usepackage{courier}        % courier font
 \usepackage{textcomp}       % straight quotes
@@ -26,7 +27,9 @@
 %, frame=bottomline
       }
 
-
+\newcommand{\lml}{\lstset{language=ML,morekeywords={match,int,char,string,list,option}}}
+\newcommand{\lc}{\lstset{language=C,morekeywords={}}}
+\newcommand{\lnone}{\lstset{language={},morekeywords={}}}
 
 \raggedbottom                           % try to avoid widows and orphans
 \sloppy
@@ -77,7 +80,7 @@ Supervisor:         & Stephen Kell                    \\
 \end{tabular}
 }
 \footnotetext[1]{This word count was computed
-by \lstinline!detex diss.tex | tr -cd '0-9A-Za-z \\n' | wc -w!
+by \lnone\lstinline!detex diss.tex | tr -cd '0-9A-Za-z \\n' | wc -w!
 }
 \stepcounter{footnote}
 
@@ -168,7 +171,7 @@ The OCaml bytecode debugger, \lstinline{ocamldebug}, forms part of the core
 OCaml toolchain. One major problem is that \lstinline{ocamldebug} is unable to
 ``see through'' polymorphism. For instance, suppose we would like to debug the
 following polymorphic list-reverse function, which has type
-\lstinline{'a list -> 'a list}:
+\lml\lstinline{'a list -> 'a list}:
 
 \begin{lstlisting}
 let my_rev lst =
@@ -177,23 +180,23 @@ let my_rev lst =
   | x::xs -> List.append xs [x]
 
 let result = my_rev [1; 2; 3]
-\end{lstlisting}
+\end{lstlisting}\lnone
 
 Now let's try to debug the function with \lstinline{ocamldebug}.
 
 \begin{lstlisting}
-$ (*\aftergroup\bfseries*)ocamlc -g -o my_rev my_rev.ml(*\aftergroup\mdseries*)
-$ (*\aftergroup\bfseries*)ocamldebug my_rev(*\aftergroup\mdseries*)
+$ (!\aftergroup\bfseries!)ocamlc -g -o my_rev my_rev.ml(!\aftergroup\mdseries!)
+$ (!\aftergroup\bfseries!)ocamldebug my_rev(!\aftergroup\mdseries!)
         OCaml Debugger version 4.02.3
 
-(ocd) (*\aftergroup\bfseries*)break @ My_rev 1(*\aftergroup\mdseries*)
+(ocd) (!\aftergroup\bfseries!)break @ My_rev 1(!\aftergroup\mdseries!)
 Loading program... done.
 Breakpoint 1 at 21600: file my_rev.ml, line 2, characters 3-62
-(ocd) (*\aftergroup\bfseries*)run(*\aftergroup\mdseries*)
+(ocd) (!\aftergroup\bfseries!)run(!\aftergroup\mdseries!)
 Time: 12 - pc: 21600 - module My_rev
 Breakpoint: 1
 2   <|b|>match lst with
-(ocd) (*\aftergroup\bfseries*)print lst(*\aftergroup\mdseries*)
+(ocd) (!\aftergroup\bfseries!)print lst(!\aftergroup\mdseries!)
 lst: 'a list = [<poly>; <poly>; <poly>]
 \end{lstlisting}
 
@@ -218,7 +221,7 @@ library written by my supervisor, \lstinline{liballocs}, which keeps track of
 runtime allocation metadata (including their types) with low overhead. This
 will allow the debugger to inspect the allocation corresponding to the input to
 \lstinline{my_rev}, for instance, and conclude that it is operating on lists
-with elements of type \lstinline{int}.
+with elements of type \lc\lstinline{int}\lnone.
 
 
 \chapter{Preparation}
@@ -226,8 +229,6 @@ with elements of type \lstinline{int}.
 Before starting the project, I was fairly comfortable with both the OCaml and
 C languages. However, I had no experience with the OCaml compiler codebase, nor
 indeed any experience in working on a project as large as it.
-
-\section{The OCaml compiler}
 
 The vast majority of my code will be written to be built as part of the OCaml
 compiler. The compiler is itself written in OCaml, and is a large and complex
@@ -238,7 +239,7 @@ The OCaml compiler processes OCaml code in several phases:
 
 TODO diagram
 
-\subsection{Common types}\label{common-types}
+\section{Common types}\label{common-types}
 
 The compiler represents the name of all variables as \lstinline!Ident.t!, which
 is conceptually a tuple of the variable name string and a unique integer. Each
@@ -246,11 +247,12 @@ let binding is given its own unique \lstinline!Ident.t! -- once the frontend
 has resolved variables using OCaml's scoping and shadowing rules, the rest of
 the compiler has the guarantee of globally unique\footnote{Up to module
 boundary -- at the \lstinline!Lambda! level intermodule variable references
-have already boiled down to record field accesses.} identifier names.
+have already boiled down to record field accesses -- see section
+\ref{inter-module-references}.} identifier names.
 
 A \lstinline!type_expr! represents the OCaml type of a particular expression.
 
-\subsection{\texttt{Parsetree} and \texttt{Typedtree}}
+\section{\texttt{Parsetree} and \texttt{Typedtree}}
 
 The very first representation used by the compiler is \lstinline!Parsetree!.
 This is an Abstract Syntax Tree produced directly from the OCaml source code by
@@ -265,7 +267,7 @@ well-typed. The \lstinline!Typedtree! is almost identical to
 in the tree is augmented with the \lstinline!type_expr! -- the expression of
 this type.
 
-\subsection{\texttt{Lambda} IR}
+\section{\texttt{Lambda} IR}
 
 For our purposes, \lstinline!Lambda! is the most important representation in
 the OCaml compiler, as it is the starting point for our compiler. This
@@ -286,6 +288,99 @@ Notably this pass does NOT provide:
         complete applications} -- see section \ref{closures-compiler-support}
 \end{itemize}
 
+\subsection{Introduction to \texttt{Lambda}}
+
+Each OCaml file implicitly defines a module, whose name is the same as the
+filename capitalised. For instance, \lstinline!test.ml! defines a module named
+\lstinline!Test!.
+
+At the core language level\footnote{That is, ignoring the module sublanguage.},
+every toplevel statement must be a let-statement. However, there are two
+different types. Let-statements which define functions have bodies should not
+be executed immediately -- only when the function is called. All other
+let-statements should run exactly once when the module is loaded for the first
+time. For instance:
+\lml\begin{lstlisting}
+(* function -- not run immediately *)
+let foo () = [ 3 ; 2 ; 1 ]
+
+(* ignored result -- run immediately *)
+let _ = foo ()
+
+(* variable -- run immediately *)
+let bar = List.sort (-) (foo ())\end{lstlisting}\lnone
+
+This will get translated into the following (abridged) \lstinline!Lambda! code.
+\lml\lstset{numbers=left}\begin{lstlisting}
+Lseq (
+  Lprim (Popaque, [ Lprim (Pgetglobal, [ "List" ]) ]),
+  Llet (
+    foo/1199,
+    Lfunction ([ param/1255 ], ...),
+    Lseq (
+      Lapply {
+        ap_func = foo/1199,
+        ap_args = [ Lconst (Const_base (Const_pointer 0)) ]
+      },
+      Llet (
+        bar/1200,
+        Lapply {
+          ap_func =
+            Lprim (Pgetfield 40, [
+              Lprim (Pgetglobal, [ "List" ])
+            ]),
+          ap_args = [ ... ]
+        },
+        Lprim (Pmakeblock (0, Immutable), [foo/1199, bar/1200])
+      )
+    )
+  )
+)\end{lstlisting}\lnone\lstset{numbers=none}
+
+There are several things to note about the \lstinline!lambda! tree produced.
+\begin{enumerate}
+  \item \lml\lstinline!let!\lnone{} gets translated to \lstinline!Llet!, as can
+    be seen on lines 3 and 11 of the output. The tree ends up very nested, as
+    \lstinline!Let! constructor takes as
+		its last argument a \lstinline!lambda!
+    representing the rest of the module. This mirrors the form
+    of a (non-toplevel) \lml\lstinline!let ... in ...!\lnone{} expression in OCaml,
+    in contrast to a more imperative style \lstinline!var ...; var ...;!.
+    Note that although one does not write the \lml\lstinline!in!\lnone{} keyword
+		at the top-level, under the hood it desugars to this form regardless.
+  \item On line 6 of the output, it can be seen that the
+    \lml\lstinline!let _ = ...!\lnone{} construct desugars to the \lstinline!Lseq(l1, l2)!
+    constructor, which is used to represent the imperative \lstinline!;! operator.
+  \item On line 5, a function is defined, represented by the
+    \lstinline!Lfunction! constructor. The body of the function (of type
+    \lstinline!lambda!) is omitted for brevity.
+  \item On line 7, the \lstinline!foo! function is applied using
+    \lstinline!Lapply!, which takes a record containing (amongst other things)
+    the function and the arguments to apply.
+  \item On line 13, \lstinline!List.sort! is applied. Note how inter-module
+    references are represented as field accesses inside a global module object
+    -- as described below in \ref{inter-module-references}.
+\end{enumerate}
+
+\subsection{Inter-module references}\label{inter-module-references}
+
+Each \lstinline!.ml! file in OCaml implicitly defines a toplevel module. The
+representation the OCaml compiler compiles moules to at the \lstinline!Lambda!
+level is as an ``array''\footnote{Technically a record, which is stored as a
+block of contiguous word-sized values, and can be indexed into by integer
+offset.} of values, the order of which is defined by the OCaml compiler (likely
+based on the order of values in the \texttt{.mli} interface file).
+
+At the lambda IR all inter-modular value/function accesses have already been
+lowered to \lstinline!getfield! operations on module objects. For instance, a
+call to \lstinline!Foo.bar! will already be represented by something like
+\lstinline!getfield Foo 1!. The ordering of values in modules is determined by
+the OCaml compiler based on the module's interface (\lstinline!.mli! file if it
+exists). This scheme implicitly handles data abstraction for us.
+
+\section{Investigating closure possibilities}
+
+TODO
 
 \section{\texttt{liballocs}}
 
@@ -350,11 +445,10 @@ The following datatypes are defined for use inside my compiler. Their output rep
     \lstinline!C.expression! represents an expression -- program fragments that
     evaluate to a value (possibly of type \lstinline!void!). Notable
     constructors for this datatype include:
-
-    \begin{itemize}
+    \lml\begin{itemize}
         \item Data literals of various types:
             \begin{itemize}
-                \item \lstinline!C_IntLiteral of int64!
+                \item \lstinline!C_IntLiteral of Int64.t!
                 \item \lstinline!C_StringLiteral of string!
                 \item \lstinline!C_FloatLiteral of string!\footnote{Floats are
                     always represented in the OCaml compiler as strings, to
@@ -384,30 +478,31 @@ The following datatypes are defined for use inside my compiler. Their output rep
             function to be called, and the list of arguments. See section \ref{functions}.
         \item \lstinline!C_BinaryOp of string * expression * expression!
             represents all arithmetic and logical binary operations.
-    \end{itemize}
+    \end{itemize}\lnone
 
     For instance, the expression \lstinline!foo + 2! is represented as
-    \begin{lstlisting}
-    C_BinaryOp (C_Variable foo, "+", C_IntLiteral (Int64.of_int 2))\end{lstlisting}%
+    \lml\begin{lstlisting}
+C_BinaryOp (C_Variable foo, "+",
+            C_IntLiteral (Int64.of_int 2))\end{lstlisting}%
     (where \lstinline!foo : Ident.t! is the identifier representing the name of the
     \lstinline!foo! variable).
 
-	\item
-		\lstinline!C.statement! represents a statement -- language constructs such as:
-
-        \begin{itemize}
+    \lnone
+  \item
+    \lstinline!C.statement! represents a statement -- language constructs such as:
+        \lml\begin{itemize}
             \item \lstinline!C_If of expression * statement list * statement list!
             \item \lstinline!C_While of expression * statement list!
             \item \lstinline!C_Return of expression option!
             \item \lstinline!C_Expression of expression!
             \item etc.
-        \end{itemize}
+        \end{itemize}\lnone
         Note that statements typically contain one or more expressions, whereas
         expressions in standard C cannot contain statements. (This is however
         possible in my AST -- as described below in sections \ref{c-inline-statements} and \ref{c-inline-functions}.)
 
-	\item
-		\lstinline!C.toplevel! represents a function or global variable declaration/definition at the toplevel.
+  \item
+    \lstinline!C.toplevel! represents a function or global variable declaration/definition at the toplevel.
         TODO
 \end{itemize}
 
@@ -417,7 +512,11 @@ Refer to (appendix -- section TODO) for the complete datatype definition.
 
 In the produced C code, \lstinline!ocaml_value_t! is a type which is capable of
 representing any OCaml value. This type corresponds to the \lstinline!C_Value!
-datatype in my compiler. This type is required to represent polymorphic OCaml types: for instance a function with a parameter of OCaml type \lstinline!'a! would take a C parameter of type \lstinline!ocaml_value_t!.\footnote{As it turns out, it's easier to represent \textit{all} OCaml values as values of this type, not just polymorphic ones.}
+datatype in my compiler. This type is required to represent polymorphic OCaml
+types: for instance a function with a parameter of OCaml type \lml\lstinline!'a!\lnone
+would take a C parameter of type \lstinline!ocaml_value_t!.\footnote{As it
+turns out, it's easier to represent \textit{all} OCaml values as values of this
+type, not just polymorphic ones.}
 
 A simple way of implementing this type is to make all OCaml values boxed. This means
 that everything is allocated on the heap, and the variables of type
@@ -496,7 +595,7 @@ Using this representation \lstinline!ocaml_value_t! can be used to wrap one of t
 \end{enumerate}
 
 The actual C type definition of \lstinline!ocaml_value_t! is the following union:
-\begin{lstlisting}
+\lc\begin{lstlisting}
 union _ocaml_value_t;
 
 typedef union _ocaml_value_t *generic_datap_t;
@@ -507,7 +606,7 @@ typedef union _ocaml_value_t {
     generic_datap_t p;
     generic_funcp_t fp;
 } ocaml_value_t;
-\end{lstlisting}
+\end{lstlisting}\lnone
 Note that we use the \lstinline!i! field for both integers and doubles. This is
 because doubles need to be reinterpreted as integers in order to apply the
 $2^{48}$ shift as described previously.
@@ -526,7 +625,7 @@ We define some helper macros in C:
     \lstinline!NEW_D! is defined by viewing the double as an integer, and
     adding $2^{48}$, as follows:
 
-    \begin{lstlisting}
+\lc\begin{lstlisting}
 static intptr_t __double_encode(double x) {
     union {
         double d;
@@ -534,21 +633,23 @@ static intptr_t __double_encode(double x) {
     } s = {.d = x};
     return s.i + (1LL<<48);
 }
-#define NEW_D(v) ((ocaml_value_t){.i = __double_encode(v)})\end{lstlisting}
+#define NEW_D(v) ((ocaml_value_t){.i = __double_encode(v)})\end{lstlisting}\lnone
 
     \item \lstinline!GET_I!, \lstinline!GET_D!, and \lstinline!GET_P! allow us to
         unwrap an \lstinline{ocaml_value_t} back into a raw integer, double or
         pointer value respectively. For instance, \lstinline!GET_D! is defined
         as:
-        \begin{lstlisting}
-#define GET_D(v) (__double_decode((v).i))\end{lstlisting}
+\lc\begin{lstlisting}
+#define GET_D(v) (__double_decode((v).i))\end{lstlisting}\lnone
         where \lstinline!__double_decode! is the inverse of the \lstinline!__double_encode! operation defined previously.
 
     \item \lstinline!IS_I!, \lstinline!IS_D!, and \lstinline!IS_P! allow us to
         discriminate which type of value is wrapped inside an
-        \lstinline{ocaml_value_t}. This is done by simple integer range tests -- for instance:
-        \begin{lstlisting}
-#define IS_I(v) ((uintptr_t) (v).i >= 0xfffc000000000000ULL)\end{lstlisting}
+				\lstinline{ocaml_value_t}. This is done by simple integer range tests
+				-- for instance:
+\lc\begin{lstlisting}
+#define IS_I(v) \
+  ((uintptr_t) (v).i >= 0xfffc000000000000ULL)\end{lstlisting}\lnone
 \end{enumerate}
 
 \subsection{50-bit integer arithmetic}\label{50-bit-integer}
@@ -571,14 +672,14 @@ Logical right shift (lsr) is relatively simple -- first set the top 14 bits to z
 Arithmetic right shift (asr) and division are trickier. We first need to
 ``clean up'' the top 14 bits by extending our real sign bit (bit 49) into them.
 This can be achieved using the following C bitfield trick:
-\begin{lstlisting}
+\lc\begin{lstlisting}
 static intptr_t __sext50(intptr_t x) {
     struct {
         intptr_t x : 50;
     } s = {x};
     return s.x;
 }
-\end{lstlisting}
+\end{lstlisting}\lnone
 
 This defines a bitfield integer which is logically 50 bits long. We write
 \lstinline!x! into it, and then read out a value of type \lstinline!intptr_t!
@@ -623,11 +724,19 @@ parts of the code.
 
 \subsubsection{Primitive operations}
 
+``Primitive'' operations in \lstinline!Lambda! are represented by
+\begin{lstlisting}
+Lprim (primitive, args)\end{lstlisting}
+where \lstinline!args! are a list of \lstinline!lambda! terms, and \lstinline!primitive! is one of:
 \begin{enumerate}
-  \item \lstinline!Pidentity! TODO
-  \item \lstinline!Pignore! TODO
-  \item \lstinline!Popaque! TODO
-  \item \lstinline!Pdirapply! and \lstinline!Prevapply! TODO
+  \item \lstinline!Pidentity! which returns its sole argument verbatim;
+  \item \lstinline!Pignore! which evaluates and ignores the result of its sole argument;
+  \item \lstinline!Popaque! which for our purposes can be treated the same as
+    \lstinline!Pidentity!. However, this seems to have a special meaning inside
+    the module. Any external modules that the current compilation unit
+    depends on are listed as a sequence of
+    \lstinline!Lprim (Popaque, [external_module])!;
+  \item \lstinline!Pdirapply! and \lstinline!Prevapply! 
   \item \lstinline!Pgetglobal! TODO
   \item \lstinline!Pfield! and \lstinline!Pfloatfield! TODO
   \item \lstinline!Psetfield! TODO
@@ -793,14 +902,14 @@ value definitions, my compiler separates the variable definition process into
 three phases:
 
 \begin{enumerate}
-	\item \textbf{Allocation}: first the required memory for each variable are
-		allocated using \lstinline!malloc!;
-	\item \textbf{Closure creation (optional)}: (TODO: move this to the closure section)  at this point the memory
-		addresses of variables are known, and so can be frozen into closures as
-		needed. The process is described in great detail in section \ref{closures}
-		(TODO: actually write this section);
-	\item \textbf{Initialisation}: finally, the contents of the variables are
-		set.
+  \item \textbf{Allocation}: first the required memory for each variable are
+    allocated using \lstinline!malloc!;
+  \item \textbf{Closure creation (optional)}: (TODO: move this to the closure section)  at this point the memory
+    addresses of variables are known, and so can be frozen into closures as
+    needed. The process is described in great detail in section \ref{closures}
+    (TODO: actually write this section);
+  \item \textbf{Initialisation}: finally, the contents of the variables are
+    set.
 \end{enumerate}
 
 The resulting C code will look like:
@@ -861,7 +970,32 @@ step, and test against the variable instead.
 
 \subsection{String switches}\label{stringswitch}
 
-TODO
+The \lstinline!Lambda! IR has a specific instruction \lstinline!Lstringswitch!
+for string matching. For instance
+\begin{lstlisting}
+match x with
+| "foo" -> 1
+| "bar" -> 2
+| _     -> 3\end{lstlisting}
+is compiled into (in pseudo-\lstinline!Lambda!)
+\lstinline!Lstringswitch (x, [("foo", 1), ("bar", 2)], 3)!.
+
+However, C does not have any way to match on strings (\lstinline!char*!) -- the
+switch statement only works with ``integral'' types (such as \lstinline!int! or
+\lstinline!char!). The idiomatic way to compare strings is by using the
+standard library function \lstinline!strcmp!. Hence, we need to translate this
+construct into a \lstinline!strcmp! if-ladder:
+\begin{lstlisting}
+char *__stringswitch_1235 = x_1234;
+if (0 == strcmp(__stringswitch_1235, "foo")) {
+  1
+} else (0 == strcmp(__stringswitch_1235, "bar")) {
+  2
+} else {
+  3
+}\end{lstlisting}
+Once again we must take care to evaluate \lstinline!x! exactly once, by
+assigning the result of evaluation to a variable.
 
 \section{Standard library: \texttt{module Pervasives}}
 
@@ -889,32 +1023,32 @@ TODO
 
 \section{Inter-module linking}
 
-Each \lstinline!.ml! file in OCaml implicitly defines a toplevel module. The
-approach I have taken is to represent each such module as an array of values,
-the order of which is defined by the OCaml compiler.
+Recall from section \ref{inter-module-references} that inter-module references
+(such as \lstinline!List.sort!) are compiled to record field accesses at the
+\lstinline!Lambda! level. The top-level module constructor of the currently
+compiled module returns a block which represents the record to be exported to
+other modules.
 
-At the lambda IR all inter-modular value/function accesses have already been
-lowered to \lstinline!getfield! operations on module objects. For instance, a
-call to \lstinline!Foo.bar! will already be represented by something like
-\lstinline!getfield Foo 1!. The ordering of values in modules is determined by
-the OCaml compiler based on the module's interface (\lstinline!.mli! file if it
-exists). This scheme implicitly handles data abstraction for us.
-
-A module \lstinline!foo.ml! generates a file \lstinline!foo.c! declaring global
-variable \lstinline!ocaml_value_t *Foo! (the ``module object'') and global
-function \lstinline!void Foo__init()! (the ``module constructor''). This module
+The way that we translate this concept to C is by representing a module
+\lstinline!foo! as a C compilation unit \lstinline!foo.c! exposing the following:
+\lc\begin{lstlisting}
+ocaml_value_t *Foo;  // the "module object"
+void Foo__init();    // the "module constructor"
+\end{lstlisting}\lnone
+The module
 constructor function is idempotent, and after a call to it the module object is
 guaranteed to contain valid values. Furthermore all global side effects in
 \lstinline!foo.ml! are also performed when the module is initialised for the
 first time.
 
 Note that \lstinline!Foo! may well depend on other modules, such as
-\lstinline!Pervasives!. In \lstinline!foo.c! any such dependencies are
-represented as predeclarations of the module objects and constructors, and
-calls to constructors at the start of \lstinline!Foo__init!. The skeleton of
-such a module is shown in the listing below:
-
-\begin{lstlisting}
+\lstinline!Pervasives!. Recall that these were represented as
+\lstinline{Popaque} references at the root of the \lstinline!lambda! tree.
+In \lstinline!foo.c! any such dependencies are represented as predeclarations
+of the module objects and constructors, and calls to constructors at the start
+of \lstinline!Foo__init!. The skeleton of such a module is shown in the listing
+below:
+\lc\begin{lstlisting}
 #include "liballocs_runtime.h"
 
 void Pervasives__init();
@@ -931,7 +1065,7 @@ void Foo__init() {
         // allocate and construct module object Foo
     }
 }
-\end{lstlisting}
+\end{lstlisting}\lnone
 
 \section{Type information for \texttt{liballocs}}\label{type-information-for-liballocs}
 
