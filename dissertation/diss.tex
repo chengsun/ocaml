@@ -428,12 +428,19 @@ allocated block, and also the C type of the allocation.
 \section{Summary and structure of code}
 
 \begin{enumerate}
-  \item the modified driver (\lstinline!driver/compile.ml! -- section\ref{modified-compiler-driver})
+  \item the modified driver (\lstinline!driver/compile.ml! -- section \ref{modified-compiler-driver})
   \item the C compilation stage (\lstinline!bytecomp/liballocs.ml! -- section \ref{module-c})
   \item the runtime
     \begin{enumerate}
-      \item OCaml standard library (\lstinline!stdlib_liballocs!)
-      \item C runtime library (\lstinline!liballocs_runtime.c!)
+      \item OCaml standard library (\lstinline!stdlib_liballocs!).
+
+        This turned out not to require modifications from upstream -- see sections \ref{pervasives} and \ref{module-list};
+      \item C runtime library (\lstinline!liballocs_runtime.c!), implementing the following:
+        \begin{itemize}
+          \item \lstinline!Pervasives! external C dependencies (section \ref{pervasives-c-runtime});
+          \item Exceptions (section \ref{exceptions-runtime-support}).
+          \item Closures (section \ref{closures-runtime-support});
+        \end{itemize}
     \end{enumerate}
   \item build script (\lstinline!build_liballocs.sh! -- section \ref{build-process})
   \item test script (\lstinline!run_tests.sh! -- section \ref{regression-testing})
@@ -746,7 +753,7 @@ into type ``target'' is defined as below:
   \item Otherwise use a C cast to the target type.
 \end{enumerate}
 
-\subsection{\texttt{module Translate}: compilation from lambda IR to C AST}
+\section{\texttt{module Translate}: compilation from lambda IR to C AST}
 
 The implementation of \lstinline!Translate! is done via a recursive tree-walk
 over the \lstinline!Lambda! tree. Three mutually recursive functions each
@@ -857,7 +864,7 @@ See section \ref{module-fixup} for more details.
 let x = (fun x -> x + 1) 2
 \end{lstlisting}
 
-\subsection{\texttt{module Fixup}: translation from extended-C AST to valid C AST}\label{module-fixup}
+\section{\texttt{module Fixup}: translation from extended-C AST to valid C AST}\label{module-fixup}
 
 Similar to \lstinline!Translate!, the implementation of \lstinline!Fixup! is
 done via a recursive tree-walk. Three mutually recursive functions each visit
@@ -888,7 +895,7 @@ assign_last_value_of_statement
 
 TODO
 
-\subsection{\texttt{module Emitcode}: outputting C AST to a file}\label{emitcode}
+\section{\texttt{module Emitcode}: outputting C AST to a file}\label{emitcode}
 
 TODO
 
@@ -900,7 +907,7 @@ Not all OCaml identifiers are legal C identifiers. TODO
 
 C outputs normal variables and function pointers in different styles. TODO
 
-\subsection{Modified compiler driver}\label{modified-compiler-driver}
+\section{Modified compiler driver}\label{modified-compiler-driver}
 
 Support was added to the \lstinline!ocamlc! driver binary to generate and
 output C code. A new flag \lstinline!-target-liballocs! was added. After the
@@ -1039,9 +1046,9 @@ if (0 == strcmp(__stringswitch_1235, "foo")) {
 Once again we must take care to evaluate \lstinline!x! exactly once, by
 assigning the result of evaluation to a variable.
 
-\section{Standard library: \texttt{module Pervasives}}
+\section{Standard library: \texttt{module Pervasives}}\label{pervasives}
 
-\subsection{C runtime}
+\subsection{C runtime}\label{pervasives-c-runtime}
 
 The Pervasives module exposes (and internally uses) a large number of external
 predefined runtime functions (such as \lstinline!caml_sys_exit!), normally
@@ -1190,7 +1197,7 @@ The memory representation of an exception contains the stringified name of the
 exception, so that if it is propagated all the way up unhandled, the runtime
 can print the name of the exception before aborting.
 
-\subsection{Runtime support}
+\subsection{Runtime support}\label{exceptions-runtime-support}
 
 \subsubsection{Toplevel handler}
 
@@ -1299,14 +1306,13 @@ Conceptually, the operation can be described as JIT-compiling the following
 snippet of pseudo-C code at runtime. (NB: things are a bit more complicated
 when \lstinline!n_args!${} > 5$ arguments, as described in the sections below.)
 
-\begin{lstlisting}
+\lc\begin{lstlisting}
 ocaml_value_t f_closure(ocaml_value_t arg1,
                         ...,
                         ocaml_value_t argn)
 {
     return f_impl(arg1, ..., argn, env);
-}
-\end{lstlisting}
+}\end{lstlisting}\lnone
 
 Note that as implemented, this won't work on anything but 64-bit Linux.
 
@@ -1366,6 +1372,14 @@ This works by using two 8-byte immediate \lstinline!mov! instructions, which
 each load a fixed constant from the program code, which happen to correspond to
 our two pointers \lstinline!env! and \lstinline!f_impl!.
 Then \lstinline!f_impl! is tail-called into.
+
+The operation of \lstinline!ocaml_liballocs_close! is to write hard-coded bytes
+corresponding to the machine code of the assembly listing above, into an
+executable buffer. The two addresses \lstinline!env! and \lstinline!f_impl!)
+are copied into the correct offsets in the template. I obtained the machine
+code by using the open-source \lstinline!nasm! assembler, and then the
+\lstinline!objdump! tool on the produced object file to obtain the bytes
+representating each instruction.
 
 \subsubsection{Closing functions that take $> 5$ arguments}
 
@@ -1696,6 +1710,53 @@ This makes use of a tail-recursive GCD implementation, a counter reference and i
 This makes heavy use of both integer and floating point arithmetic (\lstinline!log!, \lstinline!exp!, floating point division).
 \end{enumerate}
 
+
+\subsection{Investigating performance}
+
+In order to dig deeper into why certain benchmarks seem perform significantly
+worse than others, I decided to create a branch of my compiler with an
+instrumented runtime which reported various runtime statistics. In particular,
+I wanted figures on:
+\begin{enumerate}
+  \item \textbf{number of allocations performed}. If it turned out that
+    relative program performance were negatively correlated with the number of
+    allocations per second, this would suggest that the C allocator is weak at
+    dealing with the typical allocation patterns of OCaml programs.
+
+    This is achieved by hooking into the \lstinline!malloc! function, by adding
+    the following to the \lstinline!liballocs_runtime.h! header file:
+    \lc\begin{lstlisting}
+extern int n_allocations;
+#define malloc(x) (++n_allocations, malloc(x))\end{lstlisting}\lnone
+
+    (The counter \lstinline!n_allocations! is instantiated
+    in \lstinline!liballocs_runtime.c!.)
+  \item \textbf{number of closures created}. A negative correlation between
+    this and performance would suggest that the process of creating closures
+    were slow (in particular the implementation of
+    \lstinline!ocaml_liballocs_close!).
+    
+    This is achieved by hooking into the \lstinline!ocaml_liballocs_close!
+    function, incrementing a counter each time the function is
+    called.
+  \item \textbf{number of times a closure was invoked}. A negative correlation
+    between this and performance would suggest that the overhead of the closure
+    code stub were slow.
+
+    This is tricker to achieve because unlike the previous two, there is no
+    common function which is called when a closure is invoked. The code that we
+    must insert instrumentation into is the generated code stub itself.
+
+    In \lstinline!ocaml_liballocs_close!, we prefix the following two instructions to
+    each generated code stub:
+    \begin{lstlisting}
+mov r11, <n_closures_invoked>
+add dword [r11], 1\end{lstlisting}
+    where \lstinline!n_closures_invoked! is the address of the counter variable.
+\end{enumerate}
+
+TODO: results
+
 \chapter{Conclusion}\label{conclusion}
 
 The project was technically challenging, as I had to work with an unfamiliar
@@ -1736,8 +1797,9 @@ My original motivations for this project were the following:
 Limitations:
 
 \begin{itemize}
-  \item No tag in blocks. This means no support for variants
-  \item ``Overapplication'' uncurrying
+  \item No tag in blocks. This means no support for variants constructors whose
+    take arguments. This is unfortunately quite a large omission.
+  \item Currently ``overapplication'' is unsupported.
   \item Large parts of the standard library are unimplemented. Significantly \lstinline!Array!
   \item Inter-module function arity is unknown -- cannot partially apply or overapply (TODO: is this true?)
   \item No liballocs type info for \lstinline!structured\char`_constant!
