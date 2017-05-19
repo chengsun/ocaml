@@ -149,27 +149,81 @@ extent for a comparable purpose.
 
 OCaml is one of the most commonly used members of the ML family of functional
 languages. It is popular for its expressivity, type system and performance.
-However, there is not as of yet a good story for debugging OCaml programs, and
-observing their behaviour at runtime.
+My project augments the OCaml compiler with a new backend which is capable of
+targetting the C programming language. The code produced by my compiler can
+then be compiled with a C compiler such as gcc, and the resulting binary behaves
+equivalently to the original OCaml code.
+
+In particular, my compiler backend takes as input OCaml's \lstinline!Lambda!
+Intermediate Representation. The choice of this IR over any of OCaml's other IRs
+is discussed later in section \ref{why-lambda}.
+
+\section{Motivation}
+
+There are several motivating factors behind this project.
 
 \begin{enumerate}
-    \item \textbf{Feasibility}: it would be nice to know whether it is
-        technically possible to compile from OCaml code to C. In particular OCaml's
-        \lstinline!Lambda! Intermediate Representation is a fairly flexible and
-        expressive target, which is garnering increased attention as a possible
-        target IR for compiler frontends of other languages \cite{dolan16};
+    \item \textbf{Feasibility}: I was curious whether it was technically
+        possible to compile from OCaml code to C, and if so, how hard it would
+        be to do so. I was also excited by the challenge of working on the
+        internals of an industrial-strength compiler for the first time.
+    \item \textbf{Universality of \lstinline!Lambda!}. The
+        \lstinline!Lambda! IR is a fairly flexible and
+        expressive target, which is rapidly garnering attention as a
+        suitable target IR for compiler frontends of other languages
+        \cite{dolan16}. My project attempts to implement the other direction as
+        well -- that \lstinline!Lambda! is suitable for being easily translated
+        into other representations;
     \item \textbf{Performance}: C has very mature toolchains that have been
         refined and optimised over tens of years. It would be nice to leverage
         the optimisations that the GCC and Clang compilers can provide for
         free;
     \item \textbf{Observability}: gdb is a very mature debugger for C, which
-        far surpasses OCaml's in power;
+        far surpasses OCaml's in power. Along with enhancements brought about
+        by \lstinline!liballocs! (described in section
+        \ref{liballocs}), it should be possible to observe the values propagating
+        through an OCaml program far more easily. A concrete example is given
+        later in this section;
     \item \textbf{Portability}: C can be compiled on a diverse range of
-        platforms. It would be nice to know that OCaml code could theoretically
-        run on these platforms with minimal changes.
+        platforms. It would be nice to know that, by using C as an intermediate
+        step, OCaml code could theoretically run on these platforms with
+        minimal to no changes.
 \end{enumerate}
 
-TODO: select bits of project proposal introduction to insert here
+There is not as of yet a good story for debugging OCaml programs, and
+observing their behaviour at runtime.
+
+TODO
+
+\section{Summary of work done}
+
+\begin{enumerate}
+  \item I've modified the OCaml compiler driver (\lstinline!driver/compile.ml!) to teach it about compiling to C. See section \ref{modified-compiler-driver};
+  \item The most significant piece of code: the C compiler itself, implemented
+      as a stage in the compiler (\lstinline!bytecomp/liballocs.ml!). This
+      takes a \lstinline!Lambda! IR and compiles it to a semantically
+      equivalent C file. See section \ref{module-c};
+  \item I've created a custom OCaml runtime library, which the generated C
+      code must be linked against. This consists of two parts:
+    \begin{enumerate}
+      \item the standard library written in OCaml(\lstinline!stdlib_liballocs!).
+
+        Note that I did not write this part. It turned out that my compiler was powerful enough that the upstream
+        standard library modules could be used without any modification. See
+        sections \ref{pervasives} and \ref{module-list};
+      \item the C runtime library (\lstinline!liballocs_runtime.c!) which I
+          wrote from scratch, implementing runtime routines that are required
+          for various purposes:
+        \begin{itemize}
+          \item the standard library \lstinline!Pervasives! module has many external C dependencies to perform I/O, floating point maths, etc. See section \ref{pervasives-c-runtime};
+          \item support for raising and handling exceptions. See section \ref{exceptions-runtime-support}.
+          \item support for dynamically creating closures. See section \ref{closures-runtime-support};
+        \end{itemize}
+    \end{enumerate}
+  \item build script to automate the building of the compiler and runtime libraries (\lstinline!build_liballocs.sh!). See section \ref{build-process};
+  \item test suite (\lstinline!tests/!) and test script (\lstinline!run_tests.sh!) which individually test features of my compiler, and are run before each commit. See section \ref{regression-testing};
+  \item benchmark suite (\lstinline!bench/!) and benchmark scripts (\lstinline!benchmark.sh! and \lstinline!plot.r!) for performance evaluation. See section \ref{benchmarks}).
+\end{enumerate}
 
 %The OCaml bytecode debugger, \lstinline{ocamldebug}, forms part of the core
 %OCaml toolchain. One major problem is that \lstinline{ocamldebug} is unable to
@@ -266,28 +320,39 @@ The typing phase takes a \lstinline!Parsetree! and produces a
 \lstinline!Typedtree!. This is the phase that ensures that all expressions are
 well-typed. The \lstinline!Typedtree! is almost identical to
 \lstinline!Parsetree!. The difference is that every \lstinline!expression! node
-in the tree is augmented with the \lstinline!type_expr! -- the expression of
-this type.
+in the tree is augmented with its inferred \lstinline!type_expr!.
+
+However, this AST is not appropriate as a starting point for my compiler. This
+is because no desugaring has been performed yet, which means that there are too
+many cases and constructs that would have to be handled.
 
 \section{\texttt{Lambda} IR}
 
 For our purposes, \lstinline!Lambda! is the most important representation in
 the OCaml compiler, as it is the starting point for our compiler. This
 Intermediate Representation (IR) is based on a heavily augmented lambda calculus.
+It is a fairly low level representation, for example using integers to represent
+what were originally booleans or variants.
 
-The pass that compiles \lstinline!Typedtree! into \lstinline!Lambda! IR most
+The pass compiling \lstinline!Typedtree! into the \lstinline!Lambda! IR most
 significantly desugars pattern matching into elementary conditionals and
 destructuring operations. Also class and module constructs are compiled down to
-records.
+operations on records.
 
 Notably this pass does NOT:
 \begin{itemize}
-    \item preserve type information from \lstinline!Typedtree! -- see section \ref{type-information-for-liballocs};
+    \item preserve type information from \lstinline!Typedtree!. This is annoying
+        for us because we would like to preserve type information for
+        \lstinline!liballocs! to use. See section
+        \ref{type-information-for-liballocs};
     \item perform closure conversion -- see section \ref{closures};
-    \item perform uncurrying\footnote{Significantly for us this means
-        partial applications and ``overapplications'' are not converted into
-        complete applications.} -- see section \ref{closures-compiler-support}.
+    \item perform uncurrying. Significantly for us this means
+        partial applications and ``overapplications'' are not explicitly
+    expressed as complete applications. See section
+    \ref{closures-compiler-support}.
 \end{itemize}
+
+\subsection{Why \texttt{Lambda}?}\label{why-lambda}
 
 \subsection{Introduction to \texttt{Lambda}}\label{introduction-to-lambda}
 
@@ -416,7 +481,7 @@ wasn't sure whether the library would give me enough control. Finally, I wanted
 to take on the challenge of implementing closures myself, so that I could gain
 a better understanding of the technique.
 
-\section{\texttt{liballocs}}
+\section{\texttt{liballocs}}\label{liballocs}
 
 \lstinline!liballocs! is a C library (and accompanying toolchain wrapper)
 written and maintained by my supervisor, Stephen Kell. The library transparently
@@ -429,33 +494,6 @@ As the library and toolchain were designed to be drop-in replacements for gcc or
 clang, I didn't spend very much preliminary time studying the library.
 
 \chapter{Implementation}
-
-\section{Summary and structure of code}
-
-\begin{enumerate}
-  \item the modified driver (\lstinline!driver/compile.ml! -- section \ref{modified-compiler-driver})
-  \item the C compilation stage (\lstinline!bytecomp/liballocs.ml! -- section \ref{module-c})
-  \item the runtime
-    \begin{enumerate}
-      \item OCaml standard library (\lstinline!stdlib_liballocs!).
-
-        This turned out not to require modifications from upstream -- see sections \ref{pervasives} and \ref{module-list};
-      \item C runtime library (\lstinline!liballocs_runtime.c!), implementing the following:
-        \begin{itemize}
-          \item \lstinline!Pervasives! external C dependencies (section \ref{pervasives-c-runtime});
-          \item Exceptions (section \ref{exceptions-runtime-support}).
-          \item Closures (section \ref{closures-runtime-support});
-        \end{itemize}
-    \end{enumerate}
-  \item build script (\lstinline!build_liballocs.sh! -- section \ref{build-process})
-  \item test script (\lstinline!run_tests.sh! -- section \ref{regression-testing})
-  \item benchmark scripts (\lstinline!benchmark.sh! and \lstinline!plot.r! -- section \ref{benchmarks})
-\end{enumerate}
-
-My runtime is implemented assuming a fairly particular setup. A 64-bit
-Linux environment is required, due to my value representation (section
-\ref{value-representation}) and closure implementation (section
-\ref{closures}).
 
 The stages of my C compiler backend are as follows:
 
@@ -1343,15 +1381,18 @@ ocaml_value_t f_closure(ocaml_value_t arg1,
     return f_impl(arg1, ..., argn, env);
 }\end{lstlisting}\lnone
 
-Note that as implemented, this won't work on anything but 64-bit Linux.
+The operation of \lstinline!ocaml_liballocs_close! is to write hard-coded bytes
+corresponding to the appropriate machine code (listed in the following
+sections), into an executable buffer. I obtained the machine code by using the
+\lstinline!nasm! assembler, and then the \lstinline!objdump! tool on the
+produced object file to obtain the bytes representating each instruction. As
+these are hardcoded into the function, this function currently only works on
+64-bit Linux.
 
 Note that this code must be written to a memory page which has both write and
-execute permissions. (This has security implications which mean that additional
+execute permissions. This has security implications which mean that additional
 precautionary steps must be taken if this technique is to be used in production
-code.)
-
-This area of memory is bump allocated. Note that a garbage collector would need
-to be taught about this.
+code.
 
 \subsubsection{Closing functions that take $\le 5$ arguments}
 
@@ -1403,14 +1444,6 @@ This works by using two 8-byte immediate \lstinline!mov! instructions, which
 each load a fixed constant from the program code, which happen to correspond to
 our two pointers \lstinline!env! and \lstinline!f_impl!.
 Then \lstinline!f_impl! is tail-called into.
-
-The operation of \lstinline!ocaml_liballocs_close! is to write hard-coded bytes
-corresponding to the machine code of the assembly listing above, into an
-executable buffer. The two addresses \lstinline!env! and \lstinline!f_impl!)
-are copied into the correct offsets in the template. I obtained the machine
-code by using the \lstinline!nasm! assembler, and then the
-\lstinline!objdump! tool on the produced object file to obtain the bytes
-representating each instruction.
 
 \subsubsection{Closing functions that take $> 5$ arguments}
 
@@ -1995,17 +2028,64 @@ My original motivations for this project were the following:
       \end{itemize}
 \end{enumerate}
 
-Limitations:
+That being said, there are still many limitations on my compiler that I'd
+hypothetically like to fix:
 
 \begin{itemize}
-  \item No tag in blocks. This means no support for variants constructors whose
-    take arguments. This is unfortunately quite a large omission.
-  \item Currently ``overapplication'' is unsupported.
-  \item Large parts of the standard library are unimplemented. Significantly \lstinline!Array!
-  \item Inter-module function arity is unknown -- cannot partially apply or overapply (TODO: is this true?)
-  \item No liballocs type info for \lstinline!structured\char`_constant!
-  \item No polymorphic comparisons, but...
+  \item Currently ``overapplication'' is unsupported. This is when the number of
+      arguments provided to a function application exceeds the arity of the function being applied. This is illustrated by the
+      following example:
+      \lml\begin{lstlisting}
+let f x = fun y -> 42
+let overapplied = f 10 20\end{lstlisting}\lnone{}
+      The C code this translates to would have to split this into two function
+      calls, one after the other.
 
+      The mechanism for detecting this situation is actually implemented in my
+      compiler, however I did not have time to implement the actual translation.
+  \item Block tags are not supported, which basically means that
+      variant constructors which take arguments (e.g.
+      \lstinline!Foo of int | Bar of string!) cannot currently be created. The
+      issue is that my blocks do not have headers, so there is no space to
+      store the tag byte. There are three possibilities I can think of to implement this, each with various tradeoffs:
+      \begin{enumerate}
+          \item add a header to all tags. This could cause a significant memory requirement increase;
+          \item use a field in \lstinline!liballocs!'s \lstinline!uniqtype!
+              structure, which is used to describe a particular allocation.
+              This is space efficient because \lstinline!uniqtype!s are created
+              per allocation-site rather than per runtime allocation. One
+              downside is that \lstinline!liballocs! would become a hard
+              dependency (which it currently isn't), which may hinder
+              portability somewhat.
+          \item use some spare bits in the NaN boxed value representation to
+              store the tag. By squeezing out every single bit we possibly can,
+              we can theoretically recover 6 bits for a tag (3 bits from the
+              8-byte alignment requirement on pointers, 1 sign bit and 2
+              mantissa bits from filling up the unused range as fully as
+              possible). The advantage of this approach is that no extra memory
+              is required at all. However the (significant) downside is that
+              pointers must be masked before dereference, which likely incurs a
+              significant performance penalty.
+      \end{enumerate}
+  \item Large parts of the standard library are unimplemented. Significantly
+      \lstinline!Array! is missing, which provides a fixed-size contiguous list
+      datatype.
+
+      In fact, the \lstinline!array! datatype is builtin to the compiler, and there
+      are many primitive \lstinline!Lambda! operations that operate on these.
+      I did not have time to implement these. (This task is made even more tricky by
+      the fact that there is a different layout of \lstinline!array! for doubles,
+      and this optimisation is embedded deep into the compiler, bringing with it
+      its own set of primitive operations and quirks.)
+  \item I did not have time to attempt to reconstruct type information for \lstinline!structured\char`_constant!s.
+  \item Currently OCaml's polymorphic comparisons are unsupported, but all of the
+      underlying techniques required to implement this are in place already. An
+      implementation of this would use the \lstinline!IS_*! discriminating
+      macros on NaN-boxed values to perform the correct comparison operation for
+      the type of value stored.
+  \item No garbage collection. A potential GC would make use of my NaN-boxing
+      value representation to distinguish pointers from data. The GC would also
+      have to be taught about the executable pages where closure code stubs live.
 \end{itemize}
 %TODO
 
