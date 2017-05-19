@@ -9,7 +9,7 @@
 #include <string.h>    // for memcpy
 #include <sys/mman.h>  // for mmap
 
-#ifdef ENABLE_LIBALLOCS
+#ifndef DISABLE_LIBALLOCS
 #include <liballocs.h>
 #endif
 
@@ -61,7 +61,7 @@ ocaml_value_t ocaml_liballocs_raise_exn(ocaml_value_t exn) {
 
 static void *__closure_buffer = NULL;
 static int __closure_buffer_i = 0;
-static const int PAGE_SIZE = 4096;
+#define PAGE_SIZE 4096
 
 /* This function returns a pointer to a function stub allocated in a page with WX permissions.
  * n_args indicates the number of ordinary arguments fun expects to receive.
@@ -176,41 +176,58 @@ DEFINE_BUILTIN_EXCEPTION(Undefined_recursive_module)
 #undef DEFINE_BUILTIN_EXCEPTION
 
 
-#ifdef ENABLE_LIBALLOCS
+#ifndef DISABLE_LIBALLOCS
+bool __ocaml_liballocs_recursive_show_is_toplevel = true;
 void ocaml_liballocs_recursive_show(ocaml_value_t v) {
+    bool this_is_toplevel = false;
+    if (__ocaml_liballocs_recursive_show_is_toplevel) {
+        this_is_toplevel = true;
+        __ocaml_liballocs_recursive_show_is_toplevel = false;
+    }
     if (IS_P(v)) {
         struct uniqtype *type = __liballocs_get_alloc_type(GET_P(v));
-        const char *type_name = __liballocs_uniqtype_name(type);
-        int n = type->pos_maxoff / 8;
-
-        fprintf(stderr, "[ ");
-        for (int i = 0; i < n; ++i) {
-            ocaml_liballocs_recursive_show(GET_P(v)[i]);
-            if (i > 0 && i < n-1) {
-                fprintf(stderr, ", ");
+        if (!type) {
+            if (GET_P(v) == NULL) {
+                fprintf(stderr, "NULL");
+            } else {
+                fprintf(stderr, "%p", GET_P(v));
             }
+        } else {
+            int n = __liballocs_get_alloc_size(GET_P(v)) / 8;
+
+            fprintf(stderr, "[ ");
+            for (int i = 0; i < n; ++i) {
+                ocaml_liballocs_recursive_show(GET_P(v)[i]);
+                if (i < n-1) {
+                    fprintf(stderr, ", ");
+                }
+            }
+            fprintf(stderr, " ]");
         }
-        fprintf(stderr, " ] : %s\n", type_name);
 
     } else if (IS_I(v)) {
-        fprintf(stderr, "%"PRIiPTR"\n", GET_I(v));
+        fprintf(stderr, "%"PRIiPTR, GET_I(v));
     } else if (IS_D(v)) {
-        fprintf(stderr, "%f\n", GET_D(v));
+        fprintf(stderr, "%f", GET_D(v));
     } else {
         assert(false);
+    }
+    if (this_is_toplevel) {
+        fprintf(stderr, "\n");
+        __ocaml_liballocs_recursive_show_is_toplevel = true;
     }
 }
 #endif
 
 void ocaml_show(ocaml_value_t v) {
     if (IS_P(v)) {
-        fprintf(stderr, "%"PRIxPTR" : pointer\n", (uintptr_t)GET_P(v));
-#ifdef ENABLE_LIBALLOCS
+        fprintf(stderr, "%"PRIxPTR" : pointer", (uintptr_t)GET_P(v));
+#ifndef DISABLE_LIBALLOCS
         struct uniqtype *type = __liballocs_get_alloc_type(GET_P(v));
         const char *name = __liballocs_uniqtype_name(type);
-        fprintf(stderr, "of type %s\n", name);
-        int size = type->pos_maxoff;
+        fprintf(stderr, " to type %s", name);
 #endif
+        fprintf(stderr, "\n");
     } else if (IS_I(v)) {
         fprintf(stderr, "%"PRIiPTR" : integer\n", GET_I(v));
     } else if (IS_D(v)) {

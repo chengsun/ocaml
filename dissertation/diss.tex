@@ -30,7 +30,7 @@
 %, frame=bottomline
       }
 
-\newcommand{\lml}{\lstset{language=ML,morekeywords={match,int,char,string,list,option}}}
+\newcommand{\lml}{\lstset{language=ML,morekeywords={match,int,char,string,list,option,for,to,downto,done}}}
 \newcommand{\lc}{\lstset{language=C,morekeywords={}}}
 \newcommand{\lnone}{\lstset{language={},morekeywords={}}}
 
@@ -77,7 +77,7 @@ Name:               & \bf Cheng Sun                       \\
 College:            & \bf Churchill College                     \\
 Project Title:      & \bf An observable OCaml via C and \texttt{liballocs} \\
 Examination:        & \bf Computer Science Tripos -- Part II, July 2017  \\
-Word Count:         & \bf 11248\footnotemark[1] \\
+Word Count:         & \bf 11643\footnotemark[1] \\
 Project Originator: & Stephen Kell                    \\
 Supervisor:         & Stephen Kell                    \\
 \end{tabular}
@@ -90,31 +90,31 @@ by \lnone\lstinline!detex diss.tex | tr -cd '0-9A-Za-z \\n' | wc -w!
 
 \section*{Original Aims of the Project}
 
-%TODO
-%To write a demonstration dissertation\footnote{A normal footnote without the
-%complication of being in a table.} using \LaTeX\ to save
-%student's time when writing their own dissertations. The dissertation
-%should illustrate how to use the more common \LaTeX\ constructs. It
-%should include pictures and diagrams to show how these can be
-%incorporated into the dissertation.  It should contain the entire
-%\LaTeX\ source of the dissertation and the makefile.  It should
-%explain how to construct an MSDOS disk of the dissertation in
-%Postscript format that can be used by the book shop for printing, and,
-%finally, it should have the prescribed layout and format of a diploma
-%dissertation.
+To create an OCaml backend that can compile a useful subset of the OCaml
+language to C, including for instance tuples, records, polymorphic and first
+class functions. Furthermore a subset of the OCaml standard library should be
+provided, and a C runtime library implemented, providing support for closures --
+a feature non-native to C. The produced C code is to be integrated with
+liballocs, a library tracking allocations at runtime, and should be debuggable
+using liballocs to allow polymorphism to be ``seen through''.
 
 
 \section*{Work Completed}
 
-%TODO
-%All that has been completed appears in this dissertation.
+Despite the difficulty of implementing an entirely new backend into any compiler,
+I have successfully created a working compiler backend translating OCaml's
+\lstinline!Lambda! intermediate representation into standard C, which is capable
+of compiling the \lstinline!Pervasives! and \lstinline!List! stdlib modules from
+upstream as-is. Furthermore I implemented a C runtime library which provides
+support for I/O, exceptions and closures, amongst others. Observability has
+been demonstrated with \lstinline!liballocs!, and an extensive test and
+benchmark suite demonstrates competitive performance compared to the upstream
+compiler.
 
 \section*{Special Difficulties}
 
-%TODO
-%Learning how to incorporate encapulated postscript into a \LaTeX\
-%document on both Ubuntu Linux and OS X.
- 
+None.
+
 \newpage
 \section*{Declaration}
 
@@ -126,23 +126,14 @@ does not contain material that has already been used to any substantial
 extent for a comparable purpose.
 
 \bigskip
-\leftline{Signed [signature]}
+\leftline{Signed}
 
 \medskip
-\leftline{Date [date]}
+\leftline{Date}
 
 \tableofcontents
 
 \newpage
-\section*{Acknowledgements}
-
-%TODO
-%This document owes much to an earlier version written by Simon Moore
-%\cite{Moore95}.  His help, encouragement and advice was greatly 
-%appreciated.
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% now for the chapters
 
 \pagestyle{headings}
 
@@ -181,10 +172,9 @@ There are several motivating factors behind this project.
         free;
     \item \textbf{Observability}: gdb is a very mature debugger for C, which
         far surpasses OCaml's in power. Along with enhancements brought about
-        by \lstinline!liballocs! (described in section
-        \ref{liballocs}), it should be possible to observe the values propagating
-        through an OCaml program far more easily. A concrete example is given
-        later in this section;
+        by \lstinline!liballocs!, it is now possible to observe polymorphic
+        values propagating through an OCaml program. A more detailed example
+        is given below;
     \item \textbf{Portability}: C can be compiled on a diverse range of
         platforms. It would be nice to know that, by using C as an intermediate
         step, OCaml code could theoretically run on these platforms with
@@ -192,104 +182,33 @@ There are several motivating factors behind this project.
 \end{enumerate}
 
 There is not as of yet a good story for debugging OCaml programs, and
-observing their behaviour at runtime.
+observing their behaviour at runtime. The following is an example which I brought up
+in my project proposal:
+\lml\begin{lstlisting}
+let my_rev lst =
+  match lst with
+  | [] -> []
+  | x::xs -> List.append xs [x]
 
-TODO
+let result = my_rev [1; 2; 3]
+\end{lstlisting}\lnone{}
 
-\section{Summary of work done}
+ocamldebug, the OCaml bytecode debugger, cannot see through
+polymorphism. This means that if a breakpoint is set in \lstinline!my_rev!,
+ocamldebug would not be able to print out the value of the polymorphic argument
+\lstinline!lst!, because its actual type is not known.
 
-\begin{enumerate}
-  \item I've modified the OCaml compiler driver (\lstinline!driver/compile.ml!) to teach it about compiling to C.
+My project solves this problem via \lstinline!liballocs! -- a library
+written and maintained by my supervisor, Stephen Kell.\cite{kell} This library
+keeps track of runtime allocation information with low overhead. The library is
+further described in section \ref{liballocs}.
 
-    A new flag \lstinline!-target-liballocs! was added to the \lstinline!ocamlc! driver. After the
-    lambda IR is compiled as usual, the presence of this flag will
-    trigger the additional phase of compiling C code, in addition
-    to running the rest of the compiler pipeline as usual.
-  \item The most significant piece of code: the C compiler itself, implemented
-      as a stage in the compiler (\lstinline!bytecomp/liballocs.ml!). This
-      takes a \lstinline!Lambda! IR and compiles it to a semantically
-      equivalent C file. See section \ref{module-c};
-  \item I've created a custom OCaml runtime library, which the generated C
-      code must be linked against. This consists of two parts:
-    \begin{enumerate}
-      \item the standard library written in OCaml (\lstinline!stdlib_liballocs!).
-
-        Note that I did not write this part. It turned out that my compiler was powerful enough that the upstream
-        standard library modules could be used without any modification. See
-        sections \ref{pervasives} and \ref{module-list};
-      \item the C runtime library (\lstinline!liballocs_runtime.c!) which I
-          wrote from scratch, implementing runtime routines that are required
-          for various purposes:
-        \begin{itemize}
-          \item the standard library \lstinline!Pervasives! module has many external C dependencies to perform I/O, floating point maths, etc. See section \ref{pervasives-c-runtime};
-          \item support for raising and handling exceptions. See section \ref{exceptions-runtime-support}.
-          \item support for dynamically creating closures. See section \ref{closures-runtime-support};
-        \end{itemize}
-    \end{enumerate}
-  \item build script to automate the build process, which involves two steps:
-    \begin{enumerate}
-      \item invoking the Makefile of the OCaml compiler;
-      \item using the newly built compiler to build the OCaml standard library modules into C files;
-    \end{enumerate}
-  \item test suite (\lstinline!tests/!) and test script (\lstinline!run_tests.sh!) which individually test features of my compiler, and are run before each commit. See section \ref{regression-testing};
-  \item benchmark suite (\lstinline!bench/!) and benchmark scripts (\lstinline!benchmark.sh! and \lstinline!plot.r!) for performance evaluation. See section \ref{benchmarks}).
-\end{enumerate}
-
-%The OCaml bytecode debugger, \lstinline{ocamldebug}, forms part of the core
-%OCaml toolchain. One major problem is that \lstinline{ocamldebug} is unable to
-%``see through'' polymorphism. For instance, suppose we would like to debug the
-%following polymorphic list-reverse function, which has type
-%\lml\lstinline{'a list -> 'a list}:
-%
-%\begin{lstlisting}
-%let my_rev lst =
-%  match lst with
-%  | [] -> []
-%  | x::xs -> List.append xs [x]
-%
-%let result = my_rev [1; 2; 3]
-%\end{lstlisting}\lnone
-%
-%Now let's try to debug the function with \lstinline{ocamldebug}.
-%
-%\begin{lstlisting}
-%$ (!\aftergroup\bfseries!)ocamlc -g -o my_rev my_rev.ml(!\aftergroup\mdseries!)
-%$ (!\aftergroup\bfseries!)ocamldebug my_rev(!\aftergroup\mdseries!)
-%        OCaml Debugger version 4.02.3
-%
-%(ocd) (!\aftergroup\bfseries!)break @ My_rev 1(!\aftergroup\mdseries!)
-%Loading program... done.
-%Breakpoint 1 at 21600: file my_rev.ml, line 2, characters 3-62
-%(ocd) (!\aftergroup\bfseries!)run(!\aftergroup\mdseries!)
-%Time: 12 - pc: 21600 - module My_rev
-%Breakpoint: 1
-%2   <|b|>match lst with
-%(ocd) (!\aftergroup\bfseries!)print lst(!\aftergroup\mdseries!)
-%lst: 'a list = [<poly>; <poly>; <poly>]
-%\end{lstlisting}
-%
-%Note that \lstinline{ocamldebug} is unable to display the contents of the input
-%list, as it does not know the concrete type that the type variable
-%\lstinline{'a} is instantiated with for this invocation.
-%
-%There are many other deficiencies with the OCaml debugger, mostly stemming from
-%its immaturity and lack of features. These issues mean that when debugging
-%OCaml code, one often has to resort to ``printf debugging'' instead.
-%
-%The aim of this project is to investigate whether the experience of debugging
-%and observing the runtime behaviour of OCaml programs could be improved by
-%utilising the mature C toolchain. My goal is to write a translator that
-%compiles OCaml code into equivalent C code, whilst maintaining a well-defined
-%mapping between the two (in terms of variable names, types, and so on). A user
-%will then be able to debug their OCaml program by using (perhaps an augmented)
-%\lstinline{gdb} on the generated C code.
-%
-%In order to solve the problem of ``seeing through'' polymorphism, I will use a
-%library written by my supervisor, \lstinline{liballocs}, which keeps track of
-%runtime allocation metadata (including their types) with low overhead. This
-%will allow the debugger to inspect the allocation corresponding to the input to
-%\lstinline{my_rev}, for instance, and conclude that it is operating on lists
-%with elements of type \lc\lstinline{int}\lnone.
+There exists related prior work \cite{tarditi90} that shows that the
+concept of translating from a functional language from the ML family is
+feasible. However, my design and implementation will be different.  For
+instance, the presented compiler generates code that uses continuation-passing
+style, which I would like to avoid doing, as it harms observability --
+backtraces would no longer be directly meaningful.
 
 
 \chapter{Preparation}
@@ -305,7 +224,10 @@ of OCaml and 42k lines of C.\footnote{As counted by the \lstinline!cloc! tool.}
 
 The OCaml compiler processes OCaml code in several phases:
 
-TODO diagram
+\begin{center}
+  \includegraphics[width=7cm]{ocamlc}
+\end{center}
+
 
 \section{Common types}\label{common-types}
 
@@ -332,15 +254,11 @@ well-typed. The \lstinline!Typedtree! is almost identical to
 \lstinline!Parsetree!. The difference is that every \lstinline!expression! node
 in the tree is augmented with its inferred \lstinline!type_expr!.
 
-However, this AST is not appropriate as a starting point for my compiler. This
-is because no desugaring has been performed yet, which means that there are too
-many cases and constructs that would have to be handled.
-
 \section{\texttt{Lambda} IR}
 
 For our purposes, \lstinline!Lambda! is the most important representation in
 the OCaml compiler, as it is the starting point for our compiler. This
-Intermediate Representation (IR) is based on a heavily augmented lambda calculus.
+Intermediate Representation (IR) is based on a heavily augmented untyped lambda calculus.
 It is a fairly low level representation, for example using integers to represent
 what were originally booleans or variants.
 
@@ -352,8 +270,8 @@ operations on records.
 Notably this pass does NOT:
 \begin{itemize}
     \item preserve type information from \lstinline!Typedtree!. This is annoying
-        for us because we would like to preserve type information for
-        \lstinline!liballocs! to use;
+        for us because we would like type information for
+        \lstinline!liballocs! to consume;
     \item perform closure conversion;
     \item perform uncurrying. Significantly for us this means
         partial applications and ``overapplications'' are not explicitly
@@ -364,9 +282,22 @@ These issues are addressed in the implementation section.
 
 \subsection{Why \texttt{Lambda}?}\label{why-lambda}
 
-Quite a lot of research was done into the various intermediate representations in the OCaml compiler before starting my project.
+Quite a lot of research was done into the various intermediate representations
+in the OCaml compiler before starting my project. In the end, none of the
+Intermediate Representations were deemed perfect, but \lstinline!Lambda! was the
+closest starting point to what I wanted.
 
-
+\begin{enumerate}
+  \item \lstinline!Parsetree! and \lstinline!Typedtree! are not appropriate as a starting point for my compiler. This
+is because no desugaring has been performed yet, which means that there are too
+many cases and constructs that would have to be handled;
+  \item \lstinline!Clambda! (an IR that is part of the OCaml native compiler)
+    is more suitable as a starting point, because it represents closures explicitly. However it is
+    even harder to retrieve type information from than \lstinline!Lambda!. Although \lstinline!Lambda! doesn't
+    preserve \lstinline!type_expr!s for every expression, some specific
+    information, in the form of ``events'' (see section \ref{events}) is stored for the benefit of the ocamldebug bytecode debugger.
+    These events are dropped in \lstinline!Clambda!.
+\end{enumerate}
 
 \subsection{Introduction to \texttt{Lambda}}\label{introduction-to-lambda}
 
@@ -418,23 +349,17 @@ Lseq (
 There are several things to note about the \lstinline!lambda! tree produced.
 \begin{enumerate}
   \item \lml\lstinline!let!\lnone{} gets translated to \lstinline!Llet!, as can
-    be seen on lines 3 and 11 of the output. The tree ends up very nested, as
+    be seen on lines 3 and 11 of the output. The tree ends up very right-side heavy, as each
     \lstinline!Let! constructor takes as
 		its last argument a \lstinline!lambda!
     representing the rest of the module. This mirrors the form
     of a (non-toplevel) \lml\lstinline!let ... in ...!\lnone{} expression in OCaml,
     in contrast to a more imperative style \lstinline!var ...; var ...;!.
-    Note that although one does not write the \lml\lstinline!in!\lnone{} keyword
-		at the top-level, under the hood it desugars to this form regardless.
+    Although one does not write the \lml\lstinline!in!\lnone{} keyword
+		for let-statements at the top-level, under the hood it desugars to this form regardless.
   \item All variable references are represented using \lstinline!Ident.t! (see
     \ref{common-types}), denoted here using an underscore between name and numeric
     identifier.
-  \item On line 6 of the output, it can be seen that the
-    \lml\lstinline!let _ = ...!\lnone{} construct desugars to the \lstinline!Lseq(l1, l2)!
-    constructor, which is used to represent the imperative \lstinline!;! operator.
-  \item On line 5, a function is defined, represented by the
-    \lstinline!Lfunction! constructor. The body of the function (of type
-    \lstinline!lambda!) is omitted for brevity.
   \item On line 7, the \lstinline!foo! function is applied using
     \lstinline!Lapply!, which takes a record containing (amongst other things)
     the function and the arguments to apply.
@@ -459,25 +384,45 @@ There are several things to note about the \lstinline!lambda! tree produced.
     exports can be restricted by the \texttt{.mli} file if present.
 \end{enumerate}
 
-\section{Investigating C AST representations and printing}
+\section{Starting point}
 
-My compiler is required to output C code, so a way was required to represent C
-as a syntax tree that can be easily manipulated. My supervisor suggested the
+The project will be focused on creating a new ``backend'' for the OCaml
+compiler, so I will build on the existing code of the rest of the compiler.
+This includes using preexisting code for lexing, parsing and typing of OCaml programs, as
+well as the transformation from the typed AST to the \lstinline!Lambda! Intermediate
+Representation that we will be using.
+
+In order to provide a standard library to compile programs against, I used
+the existing OCaml \lstinline{stdlib}. However, the C runtime
+library was completely written by myself.
+
+I did not make use of either \lstinline{cil}or \lstinline{libffi} as suggested
+in my project proposal. The reason behind this is explained in sections
+\ref{investigating-c-ast} and \ref{investigating-closure}. All of the
+functionality they would have provided was instead manually implemented by
+myself.
+
+I did make use of \lstinline!liballocs!, described below (section \ref{liballocs}).
+
+\section{Investigating C AST representations and output}\label{investigating-c-ast}
+
+My compiler is required to output C code, so a representation of C
+is required that allows for easy manipulation. My supervisor suggested the
 use of \lstinline!cil!, a C ``intermediate language'' which is capable of
 semantically representing all C programs using a minimised subset of the language.
 
-However, I came to the conclusion that this wouldn't be a good fit for my project, because
+I came to the conclusion that this wouldn't be a good fit for my project, because
  CIL is, in a sense, trying to accomplish the opposite of what I want. CIL
  tries to represent a minimal subset of C, and allow transformations to be
  performed on this. On the other hand I'd like to represent the useful subset
  of C which I can use to compile OCaml constructs to.
 
-In addition, I anticipated that I may need fine-grained control, or custom
+In addition, I anticipated that I may need more fine-grained control, or custom
 features, to be represented in my AST. Hence I ended up going with a hand-rolled
 representation.
 
 
-\section{Investigating closure support in C}
+\section{Investigating closure support in C}\label{investigating-closure}
 
 Supporting closures in C was one of the earliest identified points of difficulty.
 Early on my supervisor recommended that I look at the approach introduced by
@@ -489,7 +434,7 @@ Even so, some preliminary investigation was done towards possible external
 libraries that could be used to provide this support for me. One of these,
 \lstinline!libffi!, was also suggested by my supervisor.
 
-However, I came to the conclusion that \lstinline!libffi!'s API was too generic
+I came to the conclusion that \lstinline!libffi!'s API was too generic
 and complex for the very specific use case that I had in mind. In addition, I
 wasn't sure whether the library would give me enough control. Finally, I wanted
 to take on the challenge of implementing closures myself, so that I could gain
@@ -497,6 +442,7 @@ a better understanding of the technique.
 
 \section{\texttt{liballocs}}\label{liballocs}
 
+I will use the open-source \lstinline{liballocs}, written by Stephen Kell.
 \lstinline!liballocs! is a C library (and accompanying toolchain wrapper)
 written and maintained by my supervisor, Stephen Kell. The library transparently
 keeps track of the sizes and types of all allocated memory, with no
@@ -506,6 +452,8 @@ allocated block, and also the C type of the allocation.
 
 As the library and toolchain were designed to be drop-in replacements for gcc or
 clang, I didn't spend very much preliminary time studying the library.
+
+
 
 \chapter{Implementation}
 
@@ -520,7 +468,7 @@ The stages of my C compiler backend are as follows:
 I have defined a datatype representing a C-like syntax tree. Not all C features
 are modelled -- only the constructs that my compiler needs to produce.
 
-The tree datatype is slightly more expressive than standard ANSI C. These extra
+The tree datatype is more expressive than standard ANSI C. These extra
 features are rewritten into standard C in a later pass, as detailed later in
 section \ref{module-fixup}.
 
@@ -531,11 +479,11 @@ The following datatypes are defined for use inside my compiler. Their output rep
     \lstinline!C.ctype! represents a C type. Notable constructors include:
 
     \begin{itemize}
+        \item \lstinline!C_Int!;
+        \item \lstinline!C_Double!;
         \item \lstinline!C_Pointer of C.ctype!;
         \item \lstinline!C_Value!, a word-sized type capable of representing
           any OCaml value -- described later in section \ref{value-representation};
-        \item \lstinline!C_Int!;
-        \item \lstinline!C_Double!;
         \item \lstinline!C_Struct of Ident.t * (C.ctype * string) list!;
         \item \lstinline!C_FunPointer of C.ctype * C.ctype list! taking return
             type and argument types.
@@ -597,16 +545,50 @@ C_BinaryOp (C_Variable foo, "+",
             \item \lstinline!C_If of expression * statement list * statement list!
             \item \lstinline!C_While of expression * statement list!
             \item \lstinline!C_Return of expression option!
-            \item \lstinline!C_Expression of expression!
             \item etc.
         \end{itemize}\lnone
         Note that statements typically contain one or more expressions, whereas
-        expressions in standard C cannot contain statements. (This is however
-        possible in my AST -- as described below in sections \ref{c-inline-statements} and \ref{c-inline-functions}.)
+        expressions in standard C cannot contain statements.
 
   \item
     \lstinline!C.toplevel! represents a function or global variable declaration/definition at the toplevel.
 \end{itemize}
+
+\subsection{Inline statements}\label{c-inline-statements}
+
+The fact that C language makes a distinction between ``statements'' and
+``expressions'' makes it less expressive than OCaml, as all core language
+features in OCaml can be used as expressions. For instance, consider the
+translation of the following OCaml code:
+
+\lml\begin{lstlisting}
+let x = if foo then (if bar then 1 else 2) else 3\end{lstlisting}\lnone{}
+
+Clearly a direct translation of this wouldn't be possible, as \lstinline!if!
+statements cannot be used as expressions in C. The ternary operator
+\lstinline!?:! exists in C as an expression analogue of \lstinline!if!.
+However, it isn't used by my compiler for two reasons.  Firstly in the
+interests of readability -- nested ternary operators get hard to read very
+quickly. The second reason is that debuggability of if statements would be
+hampered by the fact that debuggers tend not to be able to single-step easily
+from the condition to the body.
+
+Even if the ternary operator were used, there are other statements that
+cannot be made into expressions as easily. An example is the let-statement,
+which translates to variable declarations in C. Hence, a solution to this
+general problem would still be required.
+
+The way that we handle this is by extending our \lstinline!C.expression! so
+that statements can used as ``pseudo-expressions''.  We add a new constructor
+\lstinline!C_InlineRevStatements of C.statement! to the
+\lstinline!C.expression! type, which allows us to use any block of C statements as if it
+were an expression.
+
+By doing this, our example from above can be translated directly, simply by
+wrapping the \lstinline!C_If! statement up as an ``inline statement''. The
+inline statement evaluates to the ``value'' of the last statement in the block.
+
+We fix up the presence of these in a later phase -- see section \ref{module-fixup}.
 
 \section{Runtime value representation}\label{value-representation}
 
@@ -838,11 +820,12 @@ The compiler will likely implement this under the hood as
 
 \subsection{Casting \texttt{ctype}s}
 
+In order to work smoothly with both wrapped and unwrapped expressions in my compiler,
+I define a NaN-box-aware cast operation that transforms between the two when required.
+
 First, define the \textit{kind} of a non-\lstinline!C_Value! \lstinline!ctype!
 as one of the following: integer-like, float-like, data-pointer-like, or
-function-pointer-like.
-
-The operation of casting from an expression of \lstinline!ctype! ``source''
+function-pointer-like. The operation of casting from an expression of \lstinline!ctype! ``source''
 into type ``target'' is defined as below:
 
 \begin{enumerate}
@@ -855,47 +838,11 @@ into type ``target'' is defined as below:
   \item Otherwise use a C cast to the target type.
 \end{enumerate}
 
-\subsubsection{Inline statements}\label{c-inline-statements}
-
-The fact that C language makes a distinction between ``statements'' and
-``expressions'' makes it less expressive than OCaml, as all core language
-features in OCaml can be used as expressions. For instance, consider the
-translation of the following OCaml code:
-
-\begin{lstlisting}
-let x = if foo then (if bar then 1 else 2) else 3
-\end{lstlisting}
-
-Clearly a direct translation of this wouldn't be possible, as \lstinline!if!
-statements cannot be used as expressions in C. The ternary operator
-\lstinline!?:! exists in C as an expression analogue of \lstinline!if!.
-However, it isn't used by my compiler for two reasons.  Firstly in the
-interests of readability -- nested ternary operators get hard to read very
-quickly. The second reason is that debuggability of if statements would be
-hampered by the fact that debuggers tend not to be able to single-step easily
-from the condition to the body.
-
-Even if the ternary operator were used, there are other statements that
-cannot be made into expressions as easily. An example is the let-statement,
-which translates to variable declarations in C. Hence, a solution to this
-general problem would still be required.
-
-The way that we handle this is by extending our \lstinline!C.expression! so
-that statements can become expressions.  We add a new constructor
-\lstinline!C_InlineRevStatements of C.statement! to the
-\lstinline!C.expression! type, which allows us to use any C statement as if it
-were an expression.
-
-By doing this, our example from above can be translated directly, simply by
-wrapping the \lstinline!C_If! statements up as an ``inline statement block'',
-which is a pseudo-expression representing a list of statements. The
-inline statement evaluates to the ``value'' of the last statement in the block.
-
 \section{\texttt{module Translate}: compilation from lambda IR to C AST}
 
 The implementation of \lstinline!Translate! is done via a recursive tree-walk
-over the \lstinline!Lambda! tree. Three mutually recursive functions each
-target different types of C program fragment:
+over the \lstinline!Lambda! tree. Two mutually recursive functions each
+target the different types of C program fragment:
 
 \lml\begin{lstlisting}
 val lambda_to_texpression :
@@ -906,12 +853,11 @@ val lambda_to_trev_statements :
 Note that each translation function also returns the \lstinline!C.ctype! of the expression or statement. This is for the purposes
 of casting, as defined earlier. For instance, if an OCaml expression
 evaluates to an \lstinline!ocaml_value_t!, and is subsequently used in an if
-condition, the value must first be unwrapped into a boolean. The
-\lstinline!C.cast! function handles all kinds of valid casts for me.
+condition, the value must first be unwrapped into a boolean.
 
-Because of the \lstinline!cast! mechanism, and the fact I can embed statements
-within expressions using \lstinline!C_InlineRevStatements!, the actual translation
-from \lstinline!Lambda! is actually fairly straight-forward.
+Because of the flexibility of the \lstinline!cast! mechanism, and the
+expressivity that \lstinline!C_InlineRevStatements! provides, the actual
+recursive translation from \lstinline!Lambda! is actually fairly straight-forward.
 
 To illustrate, the following is the implementation of
 \lstinline!lambda_to_trev_statements! for OCaml if statements:
@@ -925,9 +871,10 @@ To illustrate, the following is the implementation of
   ctype, [C_If (cexpr_cond, sl_t, sl_f)]
 ...\end{lstlisting}
 
-(The use of \lstinline!unify_revsts! picks the more general type of the true
-and the false statements, and casts the other so that it evaluates to this type.
-The overall return type of the if statement is the more general one.)
+(The use of \lstinline!unify_revsts! picks the more general type out of the
+types of the true and false statement blocks, and casts the other so that it
+evaluates to the general type.  The overall return type of the if statement is the
+more general one.)
 
 Unfortunately the lambda IR is not documented anywhere, so the semantics
 of these instructions were divined through reverse engineering and code diving.
@@ -943,7 +890,7 @@ fairly simply to C constructs. In total I handle 49 different primitives.
 Notable \lstinline!primitive!s include:
 \begin{enumerate}
   \item unary and binary operations on integers and doubles;
-  \item \lstinline!Praise! throws an exception;
+  \item \lstinline!Praise! throws an exception (see section \ref{exceptions});
   \item \lstinline!Pstringlength! evaluates to the length of a C-style string. I translate this to a call to \lstinline!strlen!;
   \item \lstinline!Pmakeblock! performs an (untyped) allocation of a given size.
 
@@ -959,11 +906,11 @@ Notable \lstinline!primitive!s include:
 \end{enumerate}
 
 
-\subsubsection{Events}
+\subsubsection{Events}\label{events}
 
-Events are a special \lstinline!Lambda! constructor which contains static
-information on a particular scope, used by the OCaml debugger. Notably for us
-this contains the \lstinline!type_expr!s of variable bindings inside the scope.
+Events are a special \lstinline!Lambda! constructor which contains type
+information on the let bindings in scope at the point of the event. These are
+used by the OCaml debugger.
 
 It's not possible to make use of events during the translation step itself,
 as an event describing a particular binding can be encountered too late during
@@ -991,7 +938,7 @@ definition'' pseudo-expression. After fixup the function body will get pulled
 out to the toplevel, and the pseudo-expression replaced with the name of the
 newly created function.
 
-Note that this does not work if the function is not closed (depends on values
+Note that this does not work if the function is not closed (i.e. depends on values
 from its environment). In this case we must create a closure at runtime instead, and
 this is the subject of section \ref{closures}.
 
@@ -999,13 +946,10 @@ this is the subject of section \ref{closures}.
 
 The purpose of fixup is to eliminate inline statements and inline function
 definitions. Similar to \lstinline!Translate!, the implementation is done via a
-recursive tree-walk. Three mutually recursive functions each visit
+recursive tree-walk. Mutually recursive functions each visit
 different types of nodes:
 
 \begin{lstlisting}
-var fixup_let_defs :
-  Fixup.t -> C.statement list -> C.let_definition list ->
-  C.statement list
 var fixup_expression :
   Fixup.t -> C.statement list -> C.expression ->
   C.statement list * C.expression
@@ -1029,7 +973,7 @@ To illustrate, consider fixing the following (where square brackets indicate inl
 x = [
   if (a) { 42; } else { foo(); }
 ];\end{lstlisting}\lnone{}
-turns into the following after fixup:
+This turns into the following after fixup:
 \lc\begin{lstlisting}
 int __deinlined;
 if (a) { __deinlined = 42; } else { __deinlined = foo(); }
@@ -1072,12 +1016,6 @@ to note:
     void (*x)();\end{lstlisting}\lnone{}
 \end{enumerate}
 
-\section{Build process}\label{build-process}
-
-
-Also see \ref{module-list}.
-
-
 \section{Basic constructs}
 
 \subsection{Functions and complete application}\label{functions}
@@ -1085,11 +1023,11 @@ Also see \ref{module-list}.
 OCaml functions map directly to C functions, with complete function application
 corresponding to function calls. Currently all functions have arguments and
 return values of wrapped type \lstinline!ocaml_value_t!. This is to facilitate
-calling functions in another module -- at the \lstinline!Lambda! level I did
+calling functions in another module -- at the \lstinline!Lambda! level I do
 not have type information about functions in other modules.
 
 Mutually recursive functions are simply handled in C. All that is required is
-that the functions are predeclared before they are defined.
+that the functions in question are predeclared before they are defined.
 
 Partial application and closures are discussed later in section \ref{closures}.
 
@@ -1121,25 +1059,25 @@ three phases:
 
 The resulting C code for the above OCaml code will look like:
 
-\begin{lstlisting}
+\lc\begin{lstlisting}
 // Phase 1: allocation
-ocaml_value_t a_1213 = NEW_P(malloc(sizeof(ocaml_value_t) * 2));
-ocaml_value_t b_1213 = NEW_P(malloc(sizeof(ocaml_value_t) * 2));
+ocaml_value_t a_1213 = NEW_P(malloc(sizeof(ocaml_value_t)*2));
+ocaml_value_t b_1213 = NEW_P(malloc(sizeof(ocaml_value_t)*2));
 
 // Phase 3: initialisation
 a_1213[0] = 1;
 a_1213[1] = b_1213;
 b_1213[0] = 2;
 b_1213[1] = a_1213;
-\end{lstlisting}
+\end{lstlisting}\lnone{}
 
 \subsection{Range-based for loops}\label{for-loops}
 
 OCaml's for loops are range-based, coming in two varieties:
-\begin{lstlisting}
+\lml\begin{lstlisting}
 for i = 1 to 10 do ... done
 for i = 10 downto 1 do ... done
-\end{lstlisting}
+\end{lstlisting}\lnone{}
 
 The range limits are inclusive.
 
@@ -1149,18 +1087,15 @@ semantics rather than C's with my \lstinline!C.expression!
 constructor, deferring the translation to C style for-loops in the
 \lstinline!Emitcode! stage (see section \ref{emitcode}).
 
-\lstinline!C_ForInt!
-
 For instance, the first loop from the example above
 compiles to:
-
-\begin{lstlisting}
+\lc\begin{lstlisting}
 for (int64_t i_1203 = 1, _limit_1212 = 10;
      (i_1203<=_limit_1212);
      (++i_1203)) {
   ...
 }
-\end{lstlisting}
+\end{lstlisting}\lnone{}
 
 There's a slight subtlety in that we need to evaluate the range limits exactly
 once, for correct semantics when evaluating the range incurs side effects.
@@ -1171,14 +1106,12 @@ step, and test against the variable instead.
 \subsection{String switches}\label{stringswitch}
 
 The \lstinline!Lambda! IR has a specific instruction \lstinline!Lstringswitch!
-for string matching. For instance
-\begin{lstlisting}
+for string matching:
+\lml\begin{lstlisting}
 match x with
 | "foo" -> 1
 | "bar" -> 2
-| _     -> 3\end{lstlisting}
-is compiled into (in pseudo-\lstinline!Lambda!)
-\lstinline!Lstringswitch (x, [("foo", 1), ("bar", 2)], 3)!.
+| _     -> 3\end{lstlisting}\lnone{}
 
 However, C does not have any way to match on strings (\lstinline!char*!) -- the
 switch statement only works with ``integral'' types (such as \lstinline!int! or
@@ -1199,16 +1132,12 @@ assigning the result of evaluation to a variable.
 
 \section{Standard library: \texttt{module Pervasives}}\label{pervasives}
 
-\subsection{C runtime}\label{pervasives-c-runtime}
+The Pervasives module is the module that is opened by default in every single OCaml program. It exposes (and internally uses) a large number of external
+functions (such as \lstinline!caml_sys_exit!), normally
+provided by the OCaml C runtime library.
 
-The Pervasives module exposes (and internally uses) a large number of external
-predefined runtime functions (such as \lstinline!caml_sys_exit!), normally
-provided by the OCaml C runtime library. However, this library makes many
-assumptions about OCaml's tagged value representation, and is deeply integrated
-with the garbage collector. Hence new implementations of these functions had to
-be made.
-
-I selectively implemented functions that were necessary for the subset of
+Many of these functions in my own runtime library are stubs -- I selectively
+implemented functions that were necessary for the subset of
 stdlib functionality that was required to run my tests and benchmarks.
 
 \subsection{Printing to \texttt{stdout} and \texttt{stderr}}\label{pervasives-printing}
@@ -1307,18 +1236,13 @@ Interestingly, exceptions is one of the cases where the lambda IR is more
 complex than the OCaml language. Lambda distinguishes between static (local)
 exceptions, and non-static ones.
 
-Once again, because of the undocumented nature of the lambda IR, the semantics
-of these instructions were divined through reverse engineering and code diving.
-
 \subsection{Static exceptions}
 
 Static exceptions are confined to local lexical scopes -- i.e. the raise and
 the corresponding try are in the same function. The lambda instructions for
-these are \lstinline!Lstaticraise! and \lstinline!Lstaticcatch!.
-
-In this case, we can implement these using the C \lstinline!goto! feature,
-which allows control flow to jump non-linearly to another point in the same
-function.
+these are \lstinline!Lstaticraise! and \lstinline!Lstaticcatch!. In this case,
+we can implement these using the C \lstinline!goto! feature, which allows
+control flow to jump non-linearly to another point in the same function.
 
 A static exception gets compiled into the following construct:
 
@@ -1347,24 +1271,21 @@ of the program, so that execution flow resumes as if the original
 \lstinline!setjmp! returned for a second time. \lstinline!setjmp! will return
 non-zero iff it is returning for the second time.
 
-In my scheme, each exception handler calls \lstinline!setjmp!, and pushes its
-\lstinline!jmpbuf! onto the head of a global singly-linked list.
+In my scheme, an exception handler installs itself by calling
+\lstinline!setjmp!, and then pushing its \lstinline!jmpbuf! onto the head of a
+global singly-linked list.
 When an exception is raised, \lstinline!longjmp! is used to
 ``unwind'' to the last installed exception handler. The value of the exception
-that was raised is stored in another global variable, so that the
+is stored in another global variable, so that the
 exception handler can pattern match against it.
 
-The exception handler is ``uninstalled'' (popped off the head of the
+The exception handler is uninstalled (popped off the head of the
 singly-linked list of handlers) when:
 \begin{itemize}
   \item a try block finishes without raising; or
   \item the handler starts executing. This prevents exceptions raised inside the
       handler from incorrectly being recursively handled by itself.
 \end{itemize}
-
-The memory representation of an exception contains the stringified name of the
-exception, so that if it is propagated all the way up unhandled, the runtime
-can print the name of the exception before aborting.
 
 \subsection{Runtime support}\label{exceptions-runtime-support}
 
@@ -1399,13 +1320,12 @@ int main() {
 
 \subsubsection{Builtin exceptions}\label{builtin-exceptions}
 
-A number of important exceptions are embedded fairly deep in the OCaml
-language, surprisingly at a lower level than even the \lstinline!Pervasives!
-module. OCaml raises some of these exceptions specially for various reasons --
+A number of fundamental exceptions are fairly deep in the OCaml
+language. OCaml raises some of these exceptions specially for various reasons --
 for example the \lstinline!Division_by_zero! OCaml exception is raised when the
 corresponding FPU exception occurs.
 
-As these exceptions are not defined in the usual way, in OCaml code, we must
+As these exceptions are not defined in the usual way, we must
 manually declare and instantiate these exceptions in our own C runtime library.
 The list of predefined exceptions can be found in \lstinline!typing/predef.ml!.
 The C preprocessor quote trick allows us to succinctly define the list of
@@ -1550,8 +1470,10 @@ Then \lstinline!f_impl! is tail-called into.
 \subsubsection{Closing functions that take $> 5$ arguments}
 
 When \lstinline!n_args! $> 5$, \lstinline!env! needs to get passed in on the
-stack instead.
+stack instead. The diagram below shows the stack when calling an ordinary
+function (with the head of the stack at the top):
 
+\begin{center}
 \begin{tabular}{c}
   return address to caller
   \\ \hline\hline
@@ -1561,6 +1483,7 @@ stack instead.
   \\ \hline
   \lstinline!arg_n!
 \end{tabular}
+\end{center}
 
 However, implementing the direct solution is a little awkward because:
 \begin{enumerate}
@@ -1577,6 +1500,7 @@ performant. It turns out that we can get away with just pushing \lstinline!env!
 on top of the stack as follows, before \lstinline!call!ing into
 \lstinline!f_impl!. The state of the stack on entry to \lstinline!f_impl! is:
 
+\begin{center}
 \begin{tabular}{c}
   return address to stub
   \\ \hline\hline
@@ -1590,6 +1514,7 @@ on top of the stack as follows, before \lstinline!call!ing into
   \\ \hline
   \lstinline!arg_n!
 \end{tabular}
+\end{center}
 
 By treating the return address to caller as an extra (unused) argument to
 \lstinline!f_impl!, it can now access \lstinline!env! through its
@@ -1771,55 +1696,90 @@ all unit tests\footnote{At the end of my project, there were two expected
 -- works in progress were done on a separate branch before merging into master
 when ready.
 
-A selection of illustrative tests, and the C code produced, is given below.
+\section{Debugging}\label{debugging}
 
-\begin{enumerate}
-    \item \textbf{\texttt{arithmetic}}: tests integer arithmetic and shift
-        operations, and floating point operations. In particular the sign
-        extension behaviour on 50-bit integers is carefully tested for both
-        arithmetic shift and logical shift operations -- as described in
-        section \ref{50-bit-integer};
-    \item \textbf{\texttt{basic\char`_ops}}: tests compilation and behaviour of
-        nested if statements -- section \ref{module-fixup};
-    \item \textbf{\texttt{basic\char`_types}}: tests basic types: integers,
-        booleans, tuples, lists, reference types
-    \item \textbf{\texttt{closure}}: tests the first two styles of closures
-        (non-empty free variable set) -- as described in section
-        \ref{closures};
-    \item \textbf{\texttt{partialapp}}: tests the last style of closure
-        (partial application);
-    \item \textbf{\texttt{closure\char`_partialapp}}: tests that partial
-        application of a closure itself creates a working closure (contrast
-        with the partialapp test);
-    \item \textbf{\texttt{closure\char`_letrec}}: tests mutually recursive
-        closures;
-    \item \textbf{\texttt{closure\char`_toplevel}}: ensures that functions with
-        free variables that are globally scoped do not needlessly get
-        transformed into closures;
-    \item \textbf{\texttt{exn}}: tests raising and catching exceptions with and
-        without parameters -- section \ref{exceptions};
-    \item \textbf{\texttt{exn\char`_2}}: ensure that exception handlers are
-        popped correctly;
-    \item \textbf{\texttt{exn\char`_builtin}}: tests builtin exceptions --
-        section \ref{builtin-exceptions};
-    \item \textbf{\texttt{exn\char`_fatal}}: tests that uncaught exceptions
-        trigger a message and abort the program;
-    \item \textbf{\texttt{while}}: tests imperative-style while loops;
-    \item \textbf{\texttt{for}}: tests range-based for loops, including ranges
-        that have negative-length -- section \ref{for-loops};
-    \item \textbf{\texttt{letrec}}: tests basic mutually recursive functions --
-        section \ref{functions};
-    \item \textbf{\texttt{letrec\char`_value}}: tests the ``mutually recursive
-        values'' OCaml feature -- section \ref{mutually-recursive-values};
-    \item \textbf{\texttt{match}}: tests that pattern matching compiles
-        correctly;
-    \item \textbf{\texttt{print}}: tests standard library printing functions --
-        section \ref{pervasives-printing};
-    \item \textbf{\texttt{stdlib\char`_list}}: tests standard library
-        \lstinline!List! functions -- section \ref{module-list};
-    \item \textbf{\texttt{stringswitch}}: tests pattern matching on strings --
-        section \ref{stringswitch};
-\end{enumerate}
+I've implemented a function
+\lstinline!ocaml_liballocs_recursive_show! which uses
+liballocs to determine the structure of an arbitrary pointer. It queries
+liballocs for the size of the allocation that the pointer points into, and
+uses NaN boxing discriminators to determine how to print the values.
+
+Here is the motivating example \lstinline!test.ml!, originally given in the
+introduction:
+
+\begin{lstlisting}
+let my_rev lst =
+  match lst with
+  | [] -> []
+  | x::xs -> List.append xs [x]
+
+let result = my_rev [1; 2; 3]
+let result2 = my_rev [1.5; 2.5; 3.5]
+let result3 = my_rev [[1, 2], [3, 4]]
+\end{lstlisting}
+
+Our objective is to be able to set a breakpoint in \lstinline!my_rev!, and be
+able to see through the polymorphism and print out the value of \lstinline!lst!
+at each call.
+
+I compile this using my liballocs toolchain with the following command:
+\begin{lstlisting}
+/home/debian/liballocs/tools/lang/c/bin/allocscc \
+  -DENABLE_LIBALLOCS -D_GNU_SOURCE -g3 -gstrict-dwarf \
+  -std=c99 -fno-eliminate-unused-debug-types -o ./test \
+  -I../liballocs/include -I. -L../liballocs/lib \
+  -L../liballocs/src ./test.c ./stdlib_liballocs/*.c \
+  ./liballocs_runtime.c -lm -lallocs
+\end{lstlisting}
+
+Now, using the gdb debugger, I can set breakpoints and use
+\lstinline!ocaml_liballocs_recursive_show! to see through polymorphism. The
+first two commands are required when debugging using liballocs.
+
+\begin{lstlisting}
+(gdb) (!\aftergroup\bfseries!)set environment LD_PRELOAD=/home/debian/liballocs/src/liballocs_preload.so(!\aftergroup\mdseries!)
+(gdb) (!\aftergroup\bfseries!)handle SIGILL nostop noprint pass(!\aftergroup\mdseries!)
+Signal        Stop      Print   Pass to program Description
+SIGILL        No        No      Yes             Illegal instruction
+(gdb) (!\aftergroup\bfseries!)break my_rev_1199(!\aftergroup\mdseries!)
+Breakpoint 1 at 0x41898e: file ./test.c, line 25.
+(gdb) (!\aftergroup\bfseries!)run(!\aftergroup\mdseries!)
+Starting program: /home/debian/demo/test
+
+Breakpoint 1, my_rev_1199 (lst_1200=...) at ./test.c:25
+25      if (((bool)GET_I(lst_1200))) {
+(gdb) (!\aftergroup\bfseries!)call ocaml_liballocs_recursive_show(lst_1200)(!\aftergroup\mdseries!)
+[ 1, [ 2, [ 3, NULL ] ] ]
+(gdb) (!\aftergroup\bfseries!)continue(!\aftergroup\mdseries!)
+Continuing.
+
+Breakpoint 1, my_rev_1199 (lst_1200=...) at ./test.c:25
+25      if (((bool)GET_I(lst_1200))) {
+(gdb) (!\aftergroup\bfseries!)call ocaml_liballocs_recursive_show(lst_1200)(!\aftergroup\mdseries!)
+[ 1.500000, [ 2.500000, [ 3.500000, NULL ] ] ]
+(gdb) (!\aftergroup\bfseries!)continue(!\aftergroup\mdseries!)
+Continuing.
+
+Breakpoint 1, my_rev_1199 (lst_1200=...) at ./test.c:25
+25      if (((bool)GET_I(lst_1200))) {
+(gdb) (!\aftergroup\bfseries!)call ocaml_liballocs_recursive_show(lst_1200)(!\aftergroup\mdseries!)
+[ [ [ [ 1, 2 ], NULL ], [ [ 3, 4 ], NULL ] ], NULL ]
+\end{lstlisting}
+
+Notice that lists are printed in their in-memory linked list representation,
+where the empty list is represented as \lstinline!NULL!. In order to improve the
+presentation, I'd need to teach liballocs about OCaml types, as liballocs was
+only designed to model the C type system. Currently I'm only
+using liballocs to query the size of each allocation. If I had more time I'd like
+to explore encoding OCaml types better.
+
+During debugging one will notice that the variables and functions have numbers
+appended to their original names. This is not a big issue while using gdb
+because, unlike ocamldebug, gdb has good tab completion.
+
+By using gdb to debug programs, one also gets to utilise the power of gdb. For example,
+memory watchpoints, reverse debugging, etc. These all work perfectly with OCaml
+code compiled to C with my compiler.
 
 \section{Benchmarks}\label{benchmarks}
 
@@ -1835,7 +1795,7 @@ which compiles each benchmark under twelve configurations:
     \item Native code generated by \lstinline!clang! via my OCaml-to-C compiler, at each of four optimisation levels.
 \end{itemize}
 
-The timings are measured using the standard \lstinline!time! tool. Each
+The timings are measured on an otherwise idle computer using the standard \lstinline!time! tool. Each
 benchmark aims to take between 0.1--1 seconds to run, as this is the sweet spot
 where the granularity of the timer is relatively negligible, and a sensible
 number of repeat runs can be run.
@@ -1845,9 +1805,20 @@ processed and graphed using R and ggplot2. I had to learn this language and
 library from scratch, but it turned out to be a powerful tool for processing
 the large amounts of CSV data my benchmarking script generates.
 
-The results are summarised in \ref{benchmark-table}.
+My benchmarks broadly fall into one of three categories, and each benchmark described in its own section below. The results are summarised in table \ref{benchmark-table}.
 
-\begin{figure}[h]
+Broadly speaking, the C compilers usually exceed the performance of the OCaml
+bytecode compiler, apart from in a few select workloads. The OCaml native
+compiler beats my C compiled code on all except one benchmark.
+
+I ran a configuration where the OCaml GC was disabled.
+Interestingly, this never significantly improved performance, and in fact hindered
+performance significantly on some benchmarks. I'm not completely certain of the
+reason behind this -- I'm fairly certain that memory was not swapped to disk,
+so likely this is just due to poor memory locality caused by a huge heap.
+
+
+\begin{table}[h]
   \centering
   \small
 \begin{tabular}{| c | c c | c c | c c | c c |}
@@ -1864,8 +1835,8 @@ benchmark                     & mean  & sd    & mean  & sd    & mean  & sd    & 
 \lstinline!closure_invoke_1!  & \cellcolor[hsb]{0.0,0.432,1}4.084 & 0.582 & \cellcolor[hsb]{0.3,0.680,1}0.700 & 0.001 & \cellcolor[hsb]{0.3,0.890,1}0.240 & 0.000 & \cellcolor[hsb]{0.3,0.890,1}0.240 & 0.000 \\
 \lstinline!fibonacci!         & \cellcolor[hsb]{0.0,0.326,1}5.226 & 0.011 & \cellcolor[hsb]{0.3,0.586,1}1.310 & 0.000 & \cellcolor[hsb]{0.3,0.794,1}0.651 & 0.006 & \cellcolor[hsb]{0.3,0.794,1}0.650 & 0.002 \\
 \lstinline!lens!              & \cellcolor[hsb]{0.0,1.000,1}1.827 & 0.009 & \cellcolor[hsb]{0.0,1.000,1}1.326 & 0.007 & \cellcolor[hsb]{0.0,1.000,1}1.356 & 0.030 & \cellcolor[hsb]{0.0,1.000,1}1.360 & 0.031 \\
-\lstinline!list_sort!         &                                NA &    NA & \cellcolor[hsb]{0.3,0.292,1}0.794 & 0.053 & \cellcolor[hsb]{0.3,0.400,1}0.673 & 0.009 & \cellcolor[hsb]{0.0,0.402,1}0.671 & 0.005 \\
-\lstinline!p153!              &                                NA &    NA & \cellcolor[hsb]{0.0,0.357,1}0.687 & 0.010 & \cellcolor[hsb]{0.0,0.314,1}0.652 & 0.012 & \cellcolor[hsb]{0.0,0.310,1}0.649 & 0.012 \\
+\lstinline!list_sort!         &                                N/A &    N/A & \cellcolor[hsb]{0.3,0.292,1}0.794 & 0.053 & \cellcolor[hsb]{0.3,0.400,1}0.673 & 0.009 & \cellcolor[hsb]{0.0,0.402,1}0.671 & 0.005 \\
+\lstinline!p153!              &                                N/A &    N/A & \cellcolor[hsb]{0.0,0.357,1}0.687 & 0.010 & \cellcolor[hsb]{0.0,0.314,1}0.652 & 0.012 & \cellcolor[hsb]{0.0,0.310,1}0.649 & 0.012 \\
 \lstinline!p156!              & \cellcolor[hsb]{0.0,1.000,1}3.247 & 0.005 & \cellcolor[hsb]{0.0,0.511,1}2.072 & 0.012 & \cellcolor[hsb]{0.0,0.464,1}1.976 & 0.009 & \cellcolor[hsb]{0.0,0.465,1}1.977 & 0.011 \\
 \lstinline!p182!              & \cellcolor[hsb]{0.0,0.368,1}1.928 & 0.005 & \cellcolor[hsb]{0.3,0.314,1}0.762 & 0.004 & \cellcolor[hsb]{0.3,0.334,1}0.740 & 0.003 & \cellcolor[hsb]{0.3,0.342,1}0.731 & 0.002 \\
 \lstinline!p183!              & \cellcolor[hsb]{0.0,0.458,1}0.853 & 0.005 & \cellcolor[hsb]{0.0,0.062,1}0.500 & 0.002 & \cellcolor[hsb]{0.3,0.102,1}0.400 & 0.001 & \cellcolor[hsb]{0.3,0.102,1}0.400 & 0.003 \\
@@ -1888,8 +1859,8 @@ benchmark                     & mean  & sd    & mean  & sd    & mean  & sd    & 
 \lstinline!closure_invoke_1!  & \cellcolor[hsb]{0.3,0.175,1}1.809 & 0.041 & \cellcolor[hsb]{0.3,0.890,1}0.240 & 0.000 & \cellcolor[hsb]{0.3,0.854,1}0.321 & 0.004 & \cellcolor[hsb]{0.3,0.877,1}0.270 & 0.000 \\
 \lstinline!fibonacci!         & \cellcolor[hsb]{0.0,0.178,1}4.291 & 0.019 & \cellcolor[hsb]{0.3,0.788,1}0.671 & 0.004 & \cellcolor[hsb]{0.3,0.775,1}0.711 & 0.004 & \cellcolor[hsb]{0.3,0.896,1}0.328 & 0.004 \\
 \lstinline!lens!              & \cellcolor[hsb]{0.0,1.000,1}1.639 & 0.010 & \cellcolor[hsb]{0.0,1.000,1}1.365 & 0.052 & \cellcolor[hsb]{0.0,1.000,1}1.350 & 0.015 & \cellcolor[hsb]{0.0,1.000,1}1.350 & 0.052 \\
-\lstinline!list_sort!         &                                NA &    NA &                                NA &    NA &                                NA &    NA &                                NA &    NA \\
-\lstinline!p153!              &                                NA &    NA &                                NA &    NA &                                NA &    NA &                                NA &    NA \\
+\lstinline!list_sort!         &                                N/A &    N/A &                                N/A &    N/A &                                N/A &    N/A &                                N/A &    N/A \\
+\lstinline!p153!              &                                N/A &    N/A &                                N/A &    N/A &                                N/A &    N/A &                                N/A &    N/A \\
 \lstinline!p156!              & \cellcolor[hsb]{0.0,0.913,1}2.895 & 0.009 & \cellcolor[hsb]{0.0,0.536,1}2.124 & 0.008 & \cellcolor[hsb]{0.0,0.503,1}2.055 & 0.008 & \cellcolor[hsb]{0.0,0.497,1}2.043 & 0.006 \\
 \lstinline!p182!              & \cellcolor[hsb]{0.0,0.198,1}1.551 & 0.005 & \cellcolor[hsb]{0.3,0.271,1}0.810 & 0.002 & \cellcolor[hsb]{0.3,0.305,1}0.772 & 0.007 & \cellcolor[hsb]{0.3,0.378,1}0.691 & 0.006 \\
 \lstinline!p183!              & \cellcolor[hsb]{0.0,0.377,1}0.781 & 0.003 & \cellcolor[hsb]{0.0,0.051,1}0.490 & 0.001 & \cellcolor[hsb]{0.0,0.040,1}0.480 & 0.002 & \cellcolor[hsb]{0.0,0.006,1}0.450 & 0.003 \\
@@ -1923,7 +1894,7 @@ benchmark                     & mean  & sd    & mean  & sd    & mean  & sd    & 
 \end{tabular}
 
 \caption{Summary table of results for all benchmarks. The mean and standard deviations of 50 repeat runs are shown. Performance is colour coded relative to the ``ocaml'' bytecode benchmark results -- green indicates a result that is faster than this baseline, and red slower.}\label{benchmark-table}
-\end{figure}
+\end{table}
 
 \begin{figure}
 \centering
@@ -1933,8 +1904,6 @@ benchmark                     & mean  & sd    & mean  & sd    & mean  & sd    & 
 the baseline ``ocaml'' bytecode compiler. The horizontal line at 1.0 normalised
 time represents this baseline.}\label{graph-summary}
 \end{figure}
-
-My benchmarks broadly fall into one of three categories.
 
 \subsection{Microbenchmarks}
 These microbenchmarks written from scratch by me. These test particular aspects
@@ -1949,7 +1918,7 @@ of the performance of the generated code.
     \begin{enumerate}
       \item performance is fairly constant for all values of $n$, for all compilers;
       \item however, creating closures is more than twice as slow for C
-        compiled programs compared to the bytecode compiler. This is
+        compiled programs compared to the bytecode compiler. This is likely
         due to the overhead incurred in writing the 23/27 byte machine code stub
         for each closure;
 
@@ -1990,14 +1959,12 @@ of the performance of the generated code.
 
     It's easier to draw conclusions from the clang results. When $n \le 5$,
     everything is passed in registers. This is effectively constant time, as expected.
-    Invoking closures which take $n > 5$ arguments requires stack manipulation to be done --
-    in addition to the environment argument, the compiler has to place $n - 6$
-    arguments on the stack, and pop these arguments off after the function call
-    returns.
+    Invoking closures which take $n > 5$ arguments requires the compiler to place $n - 6$
+    arguments on the stack.
 
     Interestingly, \lstinline!ocamlopt! seems to be able to execute the closure
-    in constant time regardless of whether. I suspect this is because the
-    compiler backend has managed to optimise the call out through inlining.
+    in constant time regardless of $n$. I suspect this is because the
+    compiler backend has managed to optimise out the call through inlining.
     The gcc and clang compilers cannot see through the closure operation, so
     unfortunately they cannot perform same inlining operation.
 
@@ -2024,7 +1991,7 @@ of the performance of the generated code.
     into the environment object, I would expect time to increase linearly with $n$.
     This is indeed observed for each compiler configuration, although
     interestingly gcc seems to have a slope which is shallower than all others
-    (at least for the range of $n$ tested).
+    for the range of $n$ tested.
 
     \begin{figure}[h]
 \centering
@@ -2040,8 +2007,7 @@ of the performance of the generated code.
   routine (see section \ref{module-list}).
 
   The routine only creates a constant number of closures, but makes heavy use of
-  closure invocation and allocates heavily due to the list operations it
-  performs.
+  closure invocation and allocates heavily.
 \end{enumerate}
 
 \subsection{\texttt{operf-micro} benchmark suite}
@@ -2062,6 +2028,8 @@ Fibonacci function, and uses it to evaluate the $40$-th Fibonacci number.
 The benchmark primarily stress-tests the speed of function calls, as the cost
 of invoking recursive calls dominates the amount of work done inside each call.
 
+C compilers do an extremely good job with gcc beating out even the native OCaml compiler.
+
 \item
 
   The \textbf{\texttt{lens}} benchmark implements a Haskell-style lens (otherwise known as
@@ -2070,6 +2038,9 @@ functional references), and then uses lenses to operate on a
 
 This makes usage of records and higher order functions, creating a very large
 number of closures.
+
+C compilers do unusually poorly on this benchmark; this motivated the
+investigation in section \ref{performance-discrepancies}.
 
 \item
 
@@ -2093,28 +2064,20 @@ These are larger benchmarks written by me, as solutions to Project Euler problem
 \begin{enumerate}
 \item
 
-The \textbf{\texttt{p153}} benchmark implements a solution to Project Euler problem 153.
-
-This makes usage of exceptions to break out of a recursive loop early.
+The \textbf{\texttt{p153}} benchmark makes usage of exceptions to break out of a recursive loop early.
 
 \item
-  The \textbf{\texttt{p156}} benchmark implements a solution to Project Euler problem 156.
-
-This makes heavy use of recursion and imperative-style \lstinline!for! loops.
+  The \textbf{\texttt{p156}} benchmark makes heavy use of recursion, closures and imperative-style \lstinline!for! loops.
 
 \item
-  The \textbf{\texttt{p182}} benchmark implements a solution to Project Euler problem 182.
-
-This makes use of a tail-recursive GCD implementation, a counter reference and imperative-style \lstinline!for! loops.
+  The \textbf{\texttt{p182}} benchmark makes use of a tail-recursive GCD implementation, reference updates and imperative-style \lstinline!for! loops.
 
 \item
-  The \textbf{\texttt{p183}} benchmark implements a solution to Project Euler problem 183.
-
-This makes heavy use of both integer and floating point arithmetic (\lstinline!log!, \lstinline!exp!, floating point division).
+  The \textbf{\texttt{p183}} benchmark makes heavy use of both integer and floating point arithmetic (\lstinline!log!, \lstinline!exp!, floating point division).
 \end{enumerate}
 
 
-\subsection{Investigating performance discrepancies}
+\subsection{Investigating performance discrepancies}\label{performance-discrepancies}
 
 \subsubsection{}
 
@@ -2135,23 +2098,20 @@ int f(int x) {
   return ret;
 }\end{lstlisting}\lnone{}
   With a small amount of optimisation, \lstinline!f(x + 1)! can be moved into
-  tail call position.  The C specification does not provide any guarantees
-  about tail-calls, however it is still somewhat surprising that GCC fails to recognise
-  this case.
+  tail call position. It is somewhat surprising that GCC fails to recognise
+  and take advantage of this.
 
   \subsubsection{Instrumentation}
 
 In order to dig deeper into why certain benchmarks seem perform significantly
 worse than others, I decided to create a branch of my compiler with an
-instrumented runtime which reported various runtime statistics. In particular,
-I wanted figures on:
+instrumented runtime which reported the following runtime statistics. If it turned out that
+relative program performance were correlated with that program a specific high
+statistic, this would point at a part of the runtime where my C implementation were
+weaker than OCaml's.
 \begin{enumerate}
-  \item \textbf{number of allocations performed}. If it turned out that
-    relative program performance were negatively correlated with the number of
-    allocations per second, this would suggest that the C allocator is weak at
-    dealing with the typical allocation patterns of OCaml programs.
-
-    This is achieved by hooking into the \lstinline!malloc! function, by adding
+  \item \textbf{number of allocations performed}. This is achieved by hooking
+    into the \lstinline!malloc! function, by adding
     the following to the \lstinline!liballocs_runtime.h! header file:
     \lc\begin{lstlisting}
 extern int n_allocations;
@@ -2159,20 +2119,12 @@ extern int n_allocations;
 
     (The counter \lstinline!n_allocations! is instantiated
     in \lstinline!liballocs_runtime.c!.)
-  \item \textbf{number of closures created}. A negative correlation between
-    this and performance would suggest that the process of creating closures
-    were slow (in particular the implementation of
-    \lstinline!ocaml_liballocs_close!).
-    
-    This is achieved by hooking into the \lstinline!ocaml_liballocs_close!
-    function, incrementing a counter each time the function is
-    called.
-  \item \textbf{number of times a closure was invoked}. A negative correlation
-    between this and performance would suggest that the overhead of the closure
-    code stub were slow.
-
-    This is tricker to achieve because unlike the previous two, there is no
-    common function which is called when a closure is invoked. The code that we
+  \item \textbf{number of closures created}. This is achieved by hooking into
+    the \lstinline!ocaml_liballocs_close!  function, incrementing a counter
+    each time the function is called.
+  \item \textbf{number of times a closure was invoked}. This is tricker to
+    instrument because unlike the previous two, there is no common function
+    which is called when a closure is invoked. The code that we
     must insert instrumentation into is the generated code stub itself.
 
     In \lstinline!ocaml_liballocs_close!, we prefix the following two instructions to
@@ -2183,6 +2135,47 @@ add dword [r11], 1\end{lstlisting}
     where \lstinline!n_closures_invoked! is the address of the counter variable.
 \end{enumerate}
 
+The results are shown in table \ref{tab-instrumentation}.
+
+I discovered a strong correlation between a benchmark's slowness and its rate
+of closure creation (total number of
+closures created divided by the absolute amount of time taken). This is
+clearly seen in the scatter diagram in figure \ref{fig-closure-create-scatter}.
+
+I can conclude from this that the closure creation process
+(\lstinline!ocaml_liballocs_close!) is likely the weak link in my runtime, in
+comparison to upstream OCaml. It would be interesting to see whether this could
+be optimised, and what effect this could have on the benchmarks.
+
+\begin{table}
+  \tiny
+  \centering
+  \begin{tabular}{c | c c | c c | c c}
+
+benchmark & allocations & allocations/s & closures created & closure created/s & closures invoked & closures invoked/s \\ \hline
+\lstinline!closure_capture_1! & 3 & 8.55 & 1 & 2.85 & $1.00\times 10^8$ & $2.85\times 10^8$ \\
+\lstinline!closure_create_1! & $1.00\times 10^7$ & $2.78\times 10^7$ & $1.00\times 10^7$ & $2.78\times 10^7$ & 0 & 0 \\
+\lstinline!closure_invoke_1! & 5 & 20.8 & 1 & 4.17 & $1.00\times 10^8$ & $4.16\times 10^8$ \\
+\lstinline!fibonacci! & 9 & 13.8 & 0 & 0 & 0 & 0 \\
+\lstinline!lens! & $1.90\times 10^7$ & $1.40\times 10^7$ & $1.20\times 10^7$ & $8.82\times10^6$ & $4.00\times10^6$ & $2.94\times10^6$ \\
+\lstinline!list_sort! & $2.09\times 10^7$ & $3.11\times10^7$ & 5 & 7.45 & $2.05\times 10^7$ & $3.06\times10^7$ \\
+\lstinline!p153!           & $4.48\times10^6$ & $6.90\times10^6$ & $2.48\times10^6$ & $3.82\times10^6$ & $1.44\times10^7$ & $2.22\times10^7$ \\
+\lstinline!p156!           & $1.85\times10^7$ & $9.36\times10^6$ & $8.41\times10^6$ & $4.25\times10^6$ & $3.80\times10^7$ & $1.92\times10^7$ \\
+\lstinline!p182!           & $10$ & $13.7$ & $0$ & $0$ & $0$ & $0$ \\
+\lstinline!p183!           & $3.00\times10^6$ & $7.50\times10^6$ & $1.00\times10^6$ & $2.50\times10^6$ & $2.00\times10^6$ & $5.00\times10^6$ \\
+\lstinline!sieve!          & $3.91\times10^7$ & $2.72\times10^7$ & $4.90\times10^3$ & $3.40\times10^3$ & $3.86\times10^7$ & $2.68\times10^7$ \\
+\lstinline!vector_functor! & $4.00\times10^7$ & $3.01\times10^7$ & $17$ & $12.8$ & $4.00\times10^7$ & $3.01\times10^7$
+  \end{tabular}
+  \caption{Instrumentation results. The per-second results are obtained by dividing the absolute values by the \lstinline!clang -O3! run time in seconds.}
+  \label{tab-instrumentation}
+\end{table}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=15cm]{closure_create_scatter}
+  \caption{A scatter plot of all benchmarks: plotting the normalised time against the rate of closure creation.}
+  \label{fig-closure-create-scatter}
+\end{figure}
 
 
 \chapter{Conclusion}\label{conclusion}
@@ -2202,27 +2195,23 @@ My original motivations for this project were the following:
       the compiled C executables already perform competitively -- matching or
       exceeding OCaml bytecode performance in most cases, when closure creation
       doesn't dominate runtime;
-    \item \textbf{Observability}: TODO;
-    \item \textbf{Portability}: my implementation in its current state has two
-      parts which hinder portability by assuming the generated code is being
-      run on 64-bit Linux:
-      \begin{itemize}
-        \item
-          My value representation (section \ref{value-representation}) assumes
-          64-bit sized registers so that each value fits in a register.
-          In fact, this is not actually a portability problem as it will still
-          work on 32-bit target, just somewhat inefficiently;
-        \item The closure implementation on the other hand does currently have a hard
-          dependency on 64-bit Linux, due to the fact that the hardcoded
-          sequence of opcodes is specific to this CPU and ABI. Because of this
+    \item \textbf{Observability}: this was one of the weaker points of my
+      project. Although observability through parametric polymorphism was
+      achieved (section \ref{debugging}), I did not teach liballocs enough about OCaml
+      types, which meant that values had to be printed as their raw in-memory representation.
+      In hindsight I would have allocated more time working with
+      \lstinline!Liballocs! to get the best results here, instead of focusing
+      so much on making the compiler as complete as possible;
+    \item \textbf{Portability}: my closure implementation in its current state
+      hinders portability by assuming the generated code is being
+      run on 64-bit Linux. Because of this
           I somewhat regret my choice of implementing closures from scratch --
           if I had taken advantage of a widely-ported library such as
           \lstinline!libffi!, then portability would have been completely
           achievable.
-      \end{itemize}
 \end{enumerate}
 
-That being said, there are still many limitations on my compiler that I'd
+There are still many limitations on my compiler that I'd
 hypothetically like to fix:
 
 \begin{itemize}
@@ -2271,22 +2260,27 @@ let overapplied = f 10 20\end{lstlisting}\lnone{}
       the fact that there is a different layout of \lstinline!array! for doubles,
       and this optimisation is embedded deep into the compiler, bringing with it
       its own set of primitive operations and quirks.)
-  \item I did not have time to attempt to reconstruct type information for \lstinline!structured\char`_constant!s.
   \item Currently OCaml's polymorphic comparisons are unsupported, but all of the
       underlying techniques required to implement this are in place already. An
       implementation of this would use the \lstinline!IS_*! discriminating
       macros on NaN-boxed values to perform the correct comparison operation for
       the type of value stored.
-  \item No garbage collection. A potential GC would make use of my NaN-boxing
-      value representation to distinguish pointers from data. The GC would also
-      have to be taught about the executable pages where closure code stubs live.
 \end{itemize}
-%TODO
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % the bibliography
 \begin{thebibliography}{1}
+
+\bibitem{tarditi90}
+  D. Tarditi, A. Acharya, P. Lee,
+  \emph{No Assembly Required: Compiling Standard ML to C},
+  November 1990. \\ \url{http://repository.cmu.edu/cgi/viewcontent.cgi?article=3011&context=compsci}
+
+\bibitem{kell}
+  Stephen Kell,
+  \emph{liballocs},
+  \\ \url{https://github.com/stephenrkell/liballocs}
 
 \bibitem{breuel88}
   Thomas Breuel,

@@ -117,18 +117,18 @@ let result = my_rev [1; 2; 3]
 Now let's try to debug the function with \lstinline{ocamldebug}.
 
 \begin{lstlisting}
-$ (*\aftergroup\bfseries*)ocamlc -g -o my_rev my_rev.ml(*\aftergroup\mdseries*)
-$ (*\aftergroup\bfseries*)ocamldebug my_rev(*\aftergroup\mdseries*)
+$ (!\aftergroup\bfseries!)ocamlc -g -o my_rev my_rev.ml(!\aftergroup\mdseries*)
+$ (!\aftergroup\bfseries!)ocamldebug my_rev(!\aftergroup\mdseries!)
         OCaml Debugger version 4.02.3
 
-(ocd) (*\aftergroup\bfseries*)break @ My_rev 1(*\aftergroup\mdseries*)
+(ocd) (!\aftergroup\bfseries!)break @ My_rev 1(!\aftergroup\mdseries!)
 Loading program... done.
 Breakpoint 1 at 21600: file my_rev.ml, line 2, characters 3-62
-(ocd) (*\aftergroup\bfseries*)run(*\aftergroup\mdseries*)
+(ocd) (!\aftergroup\bfseries!)run(!\aftergroup\mdseries!)
 Time: 12 - pc: 21600 - module My_rev
 Breakpoint: 1
 2   <|b|>match lst with
-(ocd) (*\aftergroup\bfseries*)print lst(*\aftergroup\mdseries*)
+(ocd) (!\aftergroup\bfseries!)print lst(!\aftergroup\mdseries!)
 lst: 'a list = [<poly>; <poly>; <poly>]
 \end{lstlisting}
 
