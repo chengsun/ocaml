@@ -275,13 +275,14 @@ open C
 module Emitcode = struct
   exception Not_valid_c99
   (* translate a string to a valid C99 identifier *)
-  let fixid str =
+  let fixid id =
     let valid_char chr =
       chr >= 'a' && chr <= 'z' ||
       chr >= 'A' && chr <= 'Z' ||
       chr >= '0' && chr <= '9' ||
       chr == '_'
     in
+    let str = Ident.unique_name id in
     try
       String.iter (fun chr -> if valid_char chr then () else raise Not_valid_c99) str;
       (* just return the original if everything's ok (fast path) *)
@@ -294,7 +295,7 @@ module Emitcode = struct
         in
         valid_str := !valid_str ^ valid_chr
       ) str;
-      !valid_str
+      !valid_str ^ "_"
     end
 
   let cstruct_defn_string id fields =

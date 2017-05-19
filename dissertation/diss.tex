@@ -198,7 +198,12 @@ TODO
 \section{Summary of work done}
 
 \begin{enumerate}
-  \item I've modified the OCaml compiler driver (\lstinline!driver/compile.ml!) to teach it about compiling to C. See section \ref{modified-compiler-driver};
+  \item I've modified the OCaml compiler driver (\lstinline!driver/compile.ml!) to teach it about compiling to C.
+
+    A new flag \lstinline!-target-liballocs! was added to the \lstinline!ocamlc! driver. After the
+    lambda IR is compiled as usual, the presence of this flag will
+    trigger the additional phase of compiling C code, in addition
+    to running the rest of the compiler pipeline as usual.
   \item The most significant piece of code: the C compiler itself, implemented
       as a stage in the compiler (\lstinline!bytecomp/liballocs.ml!). This
       takes a \lstinline!Lambda! IR and compiles it to a semantically
@@ -343,16 +348,20 @@ Notably this pass does NOT:
 \begin{itemize}
     \item preserve type information from \lstinline!Typedtree!. This is annoying
         for us because we would like to preserve type information for
-        \lstinline!liballocs! to use. See section
-        \ref{type-information-for-liballocs};
-    \item perform closure conversion -- see section \ref{closures};
+        \lstinline!liballocs! to use;
+    \item perform closure conversion;
     \item perform uncurrying. Significantly for us this means
         partial applications and ``overapplications'' are not explicitly
-    expressed as complete applications. See section
-    \ref{closures-compiler-support}.
+    expressed as complete applications.
 \end{itemize}
 
+These issues are addressed in the implementation section.
+
 \subsection{Why \texttt{Lambda}?}\label{why-lambda}
+
+Quite a lot of research was done into the various intermediate representations in the OCaml compiler before starting my project.
+
+
 
 \subsection{Introduction to \texttt{Lambda}}\label{introduction-to-lambda}
 
@@ -918,6 +927,10 @@ To illustrate, the following is the implementation of
   ctype, [C_If (cexpr_cond, sl_t, sl_f)]
 ...\end{lstlisting}
 
+(The use of \lstinline!unify_revsts! picks the more general type of the true
+and the false statements, and casts the other so that it evaluates to this type.
+The overall return type of the if statement is the more general one.)
+
 Unfortunately the lambda IR is not documented anywhere, so the semantics
 of these instructions were divined through reverse engineering and code diving.
 
@@ -963,54 +976,75 @@ TODO
 
 \section{\texttt{module Fixup}: translation from extended-C AST to valid C AST}\label{module-fixup}
 
-Similar to \lstinline!Translate!, the implementation of \lstinline!Fixup! is
-done via a recursive tree-walk. Three mutually recursive functions each visit
+The purpose of fixup is to eliminate inline statements and inline function
+definitions. Similar to \lstinline!Translate!, the implementation is done via a
+recursive tree-walk. Three mutually recursive functions each visit
 different types of nodes:
 
 \begin{lstlisting}
 var fixup_let_defs :
   Fixup.t -> C.statement list -> C.let_definition list ->
   C.statement list
-
 var fixup_expression :
   Fixup.t -> C.statement list -> C.expression ->
   C.statement list * C.expression
-
 var fixup_rev_statements :
   Fixup.t -> C.statement list -> C.statement list ->
   C.statement list
 \end{lstlisting}
 
-Each fixup function is invoked in the form \lstinline!fixup_foo t accum foo!
+Each fixup function takes an accumulator of type \lstinline!C.statement list!,
+which is a (reversed) list of statements to be placed before the expression or
+statement currently being fixed.
 
-We define a single operation which is used during the process of extracting an
-expression from an inline block:
+As we traverse the AST, fixed statements get pushed onto the front of the accumulator.
+When we encounter a \lstinline!C_InlineRevStatements!, we first push the
+inlined statements onto the accumulator, and replace the expression with the
+expression that the inlined statements evaluate to. Then, once there are no more
+statements to fix, we reverse the accumulator and return the result.
 
-\begin{lstlisting}
-assign_last_value_of_statement
-\end{lstlisting}
+To illustrate, consider fixing the following (where square brackets indicate inlined statements):
+\lc\begin{lstlisting}
+x = [
+  if (a) { 42; } else { foo(); }
+];\end{lstlisting}\lnone{}
+turns into the following after fixup:
+\lc\begin{lstlisting}
+int __deinlined;
+if (a) { __deinlined = 42; } else { __deinlined = foo(); }
+x = __deinlined;\end{lstlisting}\lnone{}
 
-TODO
+Care must be taken to pass a new empty accumulator when entering a new scope,
+for example when fixing the bodies of if, for and while loops. Also, care must
+be taken to preserve evaluation order -- statements must be consed onto the
+head of the accumulator in the order that they must be evaluated.
 
 \section{\texttt{module Emitcode}: outputting C AST to a file}\label{emitcode}
 
-TODO
-
-\subsubsection{Identifier legalisation}
-
-Not all OCaml identifiers are legal C identifiers. TODO
-
-\subsubsection{Typed identifier output}
-
-C outputs normal variables and function pointers in different styles. TODO
-
-\section{Modified compiler driver}\label{modified-compiler-driver}
-
-Support was added to the \lstinline!ocamlc! driver binary to generate and
-output C code. A new flag \lstinline!-target-liballocs! was added. After the
-simplified lambda IR is generated as usual, the presence of this flag will
-trigger the additional phase of compiling and outputting the C code in addition
-to running the rest of the compiler pipeline.
+\lstinline!Emitcode! is responsible for stringifying the AST into valid C code,
+and outputting this to the target file. The majority of code is straightforward
+string manipulation, using recursion to traverse the tree. There are two things
+to note:
+\begin{enumerate}
+  \item Not all OCaml identifiers are legal in C -- for instance, the apostrophe character
+    is allowed by OCaml. C only allows alphanumeric characters and underscore.
+    We encode illegal identifiers as follows:
+    \begin{enumerate}
+			\item If an identifier contains at least one illegal character, suffix
+				the identifier with an underscore. Because identifiers normally always end with
+				their unique number, encoded identifiers will never collide with a legal
+				identifier;
+			\item For each illegal character, expand it to the character sequence
+				\lstinline!"_uXXXX_"! where \lstinline!XXXX! is the hexadecimal character code
+				of the illegal character.
+    \end{enumerate}
+	\item Certain variable declarations require special casing to format properly. In particular,
+    a function pointer \lstinline!x! with type \lc\lstinline!void (*)()!\lnone{} is not defined as:
+    \lc\begin{lstlisting}
+    void (*)() x;\end{lstlisting}\lnone{} as might be expected, but instead as
+    \lc\begin{lstlisting}
+    void (*x)();\end{lstlisting}\lnone{}
+\end{enumerate}
 
 \section{Build process}\label{build-process}
 
@@ -1023,13 +1057,16 @@ Also see \ref{module-list}.
 
 \subsection{Functions and complete application}\label{functions}
 
-TODO
+OCaml functions map directly to C functions, with complete function application
+corresponding to function calls. Currently all functions have arguments and
+return values of wrapped type \lstinline!ocaml_value_t!. This is to facilitate
+calling functions in another module -- at the \lstinline!Lambda! level I did
+not have type information about functions in other modules.
+
+Mutually recursive functions are simply handled in C. All that is required is
+that the functions are predeclared before they are defined.
 
 Partial application and closures are discussed later in section \ref{closures}.
-
-\subsection{Mutually recursive functions}\label{mutually-recursive-functions}
-
-TODO
 
 \subsection{Mutually recursive definitions}\label{mutually-recursive-values}
 
@@ -1050,15 +1087,14 @@ three phases:
 \begin{enumerate}
   \item \textbf{Allocation}: first the required memory for each variable are
     allocated using \lstinline!malloc!;
-  \item \textbf{Closure creation (optional)}: (TODO: move this to the closure section)  at this point the memory
+  \item \textbf{Closure creation} (if necessary): at this point the memory
     addresses of variables are known, and so can be frozen into closures as
-    needed. The process is described in great detail in section \ref{closures}
-    (TODO: actually write this section);
+    needed. The process is described in great detail in section \ref{closures};
   \item \textbf{Initialisation}: finally, the contents of the variables are
     set.
 \end{enumerate}
 
-The resulting C code will look like:
+The resulting C code for the above OCaml code will look like:
 
 \begin{lstlisting}
 // Phase 1: allocation
@@ -1071,13 +1107,6 @@ a_1213[1] = b_1213;
 b_1213[0] = 2;
 b_1213[1] = a_1213;
 \end{lstlisting}
-(TODO: fix this once list malloc typing works!)
-
-TODO
-
-\subsection{Imperative-style while loops}\label{while-loops}
-
-TODO
 
 \subsection{Range-based for loops}\label{for-loops}
 
@@ -1131,7 +1160,7 @@ switch statement only works with ``integral'' types (such as \lstinline!int! or
 \lstinline!char!). The idiomatic way to compare strings is by using the
 standard library function \lstinline!strcmp!. Hence, we need to translate this
 construct into a \lstinline!strcmp! if-ladder:
-\begin{lstlisting}
+\lc\begin{lstlisting}
 char *__stringswitch_1235 = x_1234;
 if (0 == strcmp(__stringswitch_1235, "foo")) {
   1
@@ -1139,7 +1168,7 @@ if (0 == strcmp(__stringswitch_1235, "foo")) {
   2
 } else {
   3
-}\end{lstlisting}
+}\end{lstlisting}\lnone{}
 Once again we must take care to evaluate \lstinline!x! exactly once, by
 assigning the result of evaluation to a variable.
 
@@ -1162,10 +1191,29 @@ See appendix TODO for details.
 \subsection{Printing to \texttt{stdout} and \texttt{stderr}}\label{pervasives-printing}
 
 Two sets of C runtime functions had to be implemented in order to support
-Pervasives functions such as \lstinline!print_int!. Int-to-string formatting
-and string printing are all delegated to the runtime library.
+\lstinline!Pervasives! functions such as \lstinline!print_int!:
+\begin{enumerate}
+  \item int-to-string formatting. This is done by implementing
+    \lstinline!caml_format_int! and \lstinline!caml_format_float!, using
+    \lstinline!snprintf! with a NULL argument to determine the length of string
+    that is required, allocating that string, and then invoking
+    \lstinline!snprintf! for a second time to actually format the number;
+  \item channel operations on \lstinline!stdout! and \lstinline!stderr!.
+    Channels are a generic buffered I/O stream interface and can be created
+    inside OCaml code itself. However, I was only interested in supporting the
+    special channels that correspond to the standard I/O descriptors.
 
-TODO
+    Normally \lstinline!Pervasives! will get the C library to allocate channel
+    objects for \lstinline!stdout! and \lstinline!stderr! at startup, by calling the C runtime function
+    \lstinline!caml_ml_open_descriptor_out!. However,
+    inside this function we cheat and return opaque (invalid)
+    pointers\footnote{Actually we just return the wrapped representation of the integer 1
+    for stdout, and 2 for stderr.}. Now, when user code tries to
+    print to a channel, the C runtime function simply checks whether the channel is
+    one of the two opaque pointers that we handed out to represent
+    \lstinline!stdout! or \lstinline!stderr!. If so, we use \lstinline!fprintf!
+    to print the string to the correct standard file descriptor.
+\end{enumerate}
 
 \section{Inter-module linking}
 
@@ -1189,11 +1237,14 @@ guaranteed to contain valid values. Furthermore all global side effects in
 first time.
 
 Note that \lstinline!Foo! may well depend on other modules, such as
-\lstinline!Pervasives!. Recall that these were represented as
+\lstinline!Pervasives!. These references are listed as (no-op)
 \lstinline{Popaque} references at the root of the \lstinline!lambda! tree.
-In \lstinline!foo.c! any such dependencies are represented as predeclarations
-of the module objects and constructors, and calls to constructors at the start
-of \lstinline!Foo__init!. The skeleton of such a module is shown in the listing
+We translate these in \lstinline!foo.c! into predeclarations
+of the relevant module objects and constructors, and insert calls to the
+constructor functions at the start
+of \lstinline!Foo__init!.
+
+The C skeleton of a module \lstinline!Foo! which depends on \lstinline!Pervasives! is shown in the listing
 below:
 \lc\begin{lstlisting}
 #include "liballocs_runtime.h"
@@ -1214,14 +1265,14 @@ void Foo__init() {
 }
 \end{lstlisting}\lnone
 
-\section{Type information for \texttt{liballocs}}\label{type-information-for-liballocs}
-
-In order to expose type information for \lstinline!liballocs!, I need to be able
-to TODO
-
-\subsection{\texttt{Pmakeblock}}
-
-TODO
+%\section{Type information for \texttt{liballocs}}\label{type-information-for-liballocs}
+%
+%In order to expose type information for \lstinline!liballocs!, I need to be able
+%to translate OCaml types into appropriate C types.
+%
+%\subsection{\texttt{Pmakeblock}}
+%
+%
 
 \section{Exceptions}\label{exceptions}
 
@@ -1668,12 +1719,11 @@ A selection of illustrative tests, and the C code produced, is given below.
         section \ref{builtin-exceptions};
     \item \textbf{\texttt{exn\char`_fatal}}: tests that uncaught exceptions
         trigger a message and abort the program;
-    \item \textbf{\texttt{while}}: tests imperative-style while loops --
-        section \ref{while-loops}.
+    \item \textbf{\texttt{while}}: tests imperative-style while loops;
     \item \textbf{\texttt{for}}: tests range-based for loops, including ranges
-        that are negative-lengthed -- section \ref{for-loops};
+        that have negative-length -- section \ref{for-loops};
     \item \textbf{\texttt{letrec}}: tests basic mutually recursive functions --
-        section \ref{mutually-recursive-functions};
+        section \ref{functions};
     \item \textbf{\texttt{letrec\char`_value}}: tests the ``mutually recursive
         values'' OCaml feature -- section \ref{mutually-recursive-values};
     \item \textbf{\texttt{match}}: tests that pattern matching compiles
@@ -1732,6 +1782,7 @@ benchmark                     & mean  & sd    & mean  & sd    & mean  & sd    & 
 \lstinline!closure_invoke_1!  & \cellcolor[hsb]{0.0,0.432,1}4.084 & 0.582 & \cellcolor[hsb]{0.3,0.680,1}0.700 & 0.001 & \cellcolor[hsb]{0.3,0.890,1}0.240 & 0.000 & \cellcolor[hsb]{0.3,0.890,1}0.240 & 0.000 \\
 \lstinline!fibonacci!         & \cellcolor[hsb]{0.0,0.326,1}5.226 & 0.011 & \cellcolor[hsb]{0.3,0.586,1}1.310 & 0.000 & \cellcolor[hsb]{0.3,0.794,1}0.651 & 0.006 & \cellcolor[hsb]{0.3,0.794,1}0.650 & 0.002 \\
 \lstinline!lens!              & \cellcolor[hsb]{0.0,1.000,1}1.827 & 0.009 & \cellcolor[hsb]{0.0,1.000,1}1.326 & 0.007 & \cellcolor[hsb]{0.0,1.000,1}1.356 & 0.030 & \cellcolor[hsb]{0.0,1.000,1}1.360 & 0.031 \\
+\lstinline!list_sort!         &                                NA &    NA & \cellcolor[hsb]{0.3,0.292,1}0.794 & 0.053 & \cellcolor[hsb]{0.3,0.400,1}0.673 & 0.009 & \cellcolor[hsb]{0.0,0.402,1}0.671 & 0.005 \\
 \lstinline!p153!              &                                NA &    NA & \cellcolor[hsb]{0.0,0.357,1}0.687 & 0.010 & \cellcolor[hsb]{0.0,0.314,1}0.652 & 0.012 & \cellcolor[hsb]{0.0,0.310,1}0.649 & 0.012 \\
 \lstinline!p156!              & \cellcolor[hsb]{0.0,1.000,1}3.247 & 0.005 & \cellcolor[hsb]{0.0,0.511,1}2.072 & 0.012 & \cellcolor[hsb]{0.0,0.464,1}1.976 & 0.009 & \cellcolor[hsb]{0.0,0.465,1}1.977 & 0.011 \\
 \lstinline!p182!              & \cellcolor[hsb]{0.0,0.368,1}1.928 & 0.005 & \cellcolor[hsb]{0.3,0.314,1}0.762 & 0.004 & \cellcolor[hsb]{0.3,0.334,1}0.740 & 0.003 & \cellcolor[hsb]{0.3,0.342,1}0.731 & 0.002 \\
@@ -1755,6 +1806,7 @@ benchmark                     & mean  & sd    & mean  & sd    & mean  & sd    & 
 \lstinline!closure_invoke_1!  & \cellcolor[hsb]{0.3,0.175,1}1.809 & 0.041 & \cellcolor[hsb]{0.3,0.890,1}0.240 & 0.000 & \cellcolor[hsb]{0.3,0.854,1}0.321 & 0.004 & \cellcolor[hsb]{0.3,0.877,1}0.270 & 0.000 \\
 \lstinline!fibonacci!         & \cellcolor[hsb]{0.0,0.178,1}4.291 & 0.019 & \cellcolor[hsb]{0.3,0.788,1}0.671 & 0.004 & \cellcolor[hsb]{0.3,0.775,1}0.711 & 0.004 & \cellcolor[hsb]{0.3,0.896,1}0.328 & 0.004 \\
 \lstinline!lens!              & \cellcolor[hsb]{0.0,1.000,1}1.639 & 0.010 & \cellcolor[hsb]{0.0,1.000,1}1.365 & 0.052 & \cellcolor[hsb]{0.0,1.000,1}1.350 & 0.015 & \cellcolor[hsb]{0.0,1.000,1}1.350 & 0.052 \\
+\lstinline!list_sort!         &                                NA &    NA &                                NA &    NA &                                NA &    NA &                                NA &    NA \\
 \lstinline!p153!              &                                NA &    NA &                                NA &    NA &                                NA &    NA &                                NA &    NA \\
 \lstinline!p156!              & \cellcolor[hsb]{0.0,0.913,1}2.895 & 0.009 & \cellcolor[hsb]{0.0,0.536,1}2.124 & 0.008 & \cellcolor[hsb]{0.0,0.503,1}2.055 & 0.008 & \cellcolor[hsb]{0.0,0.497,1}2.043 & 0.006 \\
 \lstinline!p182!              & \cellcolor[hsb]{0.0,0.198,1}1.551 & 0.005 & \cellcolor[hsb]{0.3,0.271,1}0.810 & 0.002 & \cellcolor[hsb]{0.3,0.305,1}0.772 & 0.007 & \cellcolor[hsb]{0.3,0.378,1}0.691 & 0.006 \\
@@ -1778,6 +1830,7 @@ benchmark                     & mean  & sd    & mean  & sd    & mean  & sd    & 
 \lstinline!closure_invoke_1!  & \cellcolor[hsb]{0.3,0.000,1}2.191 & 0.005 & \cellcolor[hsb]{0.0,0.000,1}2.194 & 0.009 & \cellcolor[hsb]{0.3,0.927,1}0.160 & 0.000 & \cellcolor[hsb]{0.3,0.927,1}0.161 & 0.006 \\
 \lstinline!fibonacci!         & \cellcolor[hsb]{0.3,0.000,1}3.165 & 0.010 & \cellcolor[hsb]{0.3,0.000,1}3.166 & 0.013 & \cellcolor[hsb]{0.3,0.855,1}0.460 & 0.002 & \cellcolor[hsb]{0.3,0.854,1}0.461 & 0.006 \\
 \lstinline!lens!              & \cellcolor[hsb]{0.3,0.000,1}0.393 & 0.010 & \cellcolor[hsb]{0.0,0.012,1}0.402 & 0.007 & \cellcolor[hsb]{0.3,0.898,1}0.040 & 0.000 & \cellcolor[hsb]{0.3,0.898,1}0.040 & 0.000 \\
+\lstinline!list_sort!         & \cellcolor[hsb]{0.3,0.000,1}1.122 & 0.016 & \cellcolor[hsb]{0.0,0.151,1}1.460 & 0.036 & \cellcolor[hsb]{0.3,0.530,1}0.527 & 0.022 & \cellcolor[hsb]{0.3,0.246,1}0.846 & 0.036 \\
 \lstinline!p153!              & \cellcolor[hsb]{0.3,0.000,1}0.401 & 0.003 & \cellcolor[hsb]{0.0,0.001,1}0.402 & 0.004 & \cellcolor[hsb]{0.3,0.601,1}0.160 & 0.001 & \cellcolor[hsb]{0.3,0.601,1}0.160 & 0.000 \\
 \lstinline!p156!              & \cellcolor[hsb]{0.3,0.000,1}1.025 & 0.010 & \cellcolor[hsb]{0.0,0.007,1}1.039 & 0.011 & \cellcolor[hsb]{0.3,0.912,1}0.090 & 0.001 & \cellcolor[hsb]{0.3,0.902,1}0.100 & 0.000 \\
 \lstinline!p182!              & \cellcolor[hsb]{0.3,0.000,1}1.111 & 0.004 & \cellcolor[hsb]{0.0,0.000,1}1.113 & 0.009 & \cellcolor[hsb]{0.3,0.323,1}0.752 & 0.004 & \cellcolor[hsb]{0.3,0.323,1}0.752 & 0.004 \\
