@@ -304,7 +304,7 @@ module Emitcode = struct
         Printf.sprintf "%s %s;" (ctype_to_string ctype) fieldname
       ) "\n" fields
     in
-    Printf.sprintf "struct %s {\n%s\n};\n" (fixid (Ident.unique_name id)) fieldstrings
+    Printf.sprintf "struct %s {\n%s\n};\n" (fixid id) fieldstrings
 
   let ctype_defn_string = function
     | C_Struct (id, fields) -> cstruct_defn_string id fields
@@ -320,13 +320,13 @@ module Emitcode = struct
     | FunDefn (retty, name, args, sl) ->
           Printf.sprintf "/*FIXME:fun %s %s (%s)*/{\n%s\n}"
             (ctype_to_string retty)
-            (fixid (Ident.unique_name name))
+            (fixid name)
             (map_intersperse_concat (fun (t,id) -> (ctype_and_identifier_to_string t (C_Variable id))) ", " args)
             (rev_statements_to_string sl)
     | VarDefn (ty, name, e, sl) ->
           Printf.sprintf "/*FIXME:var %s %s = */%s%s"
             (ctype_to_string ty)
-            (fixid (Ident.unique_name name))
+            (fixid name)
             (expression_to_string e)
             (match sl with [] -> "" | _ -> Printf.sprintf " /*THEN*/ {\n%s\n}" (rev_statements_to_string sl))
 
@@ -341,7 +341,7 @@ module Emitcode = struct
     | C_StringLiteral str -> Printf.sprintf "%S" str
     | C_CharLiteral ch -> Printf.sprintf "%C" ch
     | C_GlobalVariable id -> id
-    | C_Variable id -> fixid (Ident.unique_name id)
+    | C_Variable id -> fixid id
     | C_Field (e,f) -> Printf.sprintf "%s.%s" (expression_to_string e) f
     | C_ArrayIndex (e,i) -> Printf.sprintf "%s[%s]" (expression_to_string e) (expression_to_string i)
     | C_InitialiserList es -> Printf.sprintf "{%s}" (map_intersperse_concat expression_to_string ", " es)
@@ -380,8 +380,8 @@ module Emitcode = struct
     | C_ForInt (p,lo,plim,hi,dir,sl) ->
         (* need hi to be inclusive! *)
         Printf.sprintf "for (int64_t %s = %s, %s = %s; %s; %s) {\n%s\n}"
-        (fixid (Ident.unique_name p)) (expression_to_string lo)
-        (fixid (Ident.unique_name plim)) (expression_to_string hi)
+        (fixid p) (expression_to_string lo)
+        (fixid plim) (expression_to_string hi)
         (expression_to_string (C_BinaryOp ((match dir with Upto -> "<=" | Downto -> ">="), C_Variable p, C_Variable plim)))
         (expression_to_string (C_UnaryOp ((match dir with Upto -> "++" | Downto -> "--"), C_Variable p)))
         (map_intersperse_concat statement_to_string "\n" (List.rev sl))

@@ -76,7 +76,7 @@ Name:               & \bf Cheng Sun                       \\
 College:            & \bf Churchill College                     \\
 Project Title:      & \bf An observable OCaml via C and \texttt{liballocs} \\
 Examination:        & \bf Computer Science Tripos -- Part II, July 2017  \\
-Word Count:         & \bf 8614\footnotemark[1] \\
+Word Count:         & \bf 11248\footnotemark[1] \\
 Project Originator: & Stephen Kell                    \\
 Supervisor:         & Stephen Kell                    \\
 \end{tabular}
@@ -211,7 +211,7 @@ TODO
   \item I've created a custom OCaml runtime library, which the generated C
       code must be linked against. This consists of two parts:
     \begin{enumerate}
-      \item the standard library written in OCaml(\lstinline!stdlib_liballocs!).
+      \item the standard library written in OCaml (\lstinline!stdlib_liballocs!).
 
         Note that I did not write this part. It turned out that my compiler was powerful enough that the upstream
         standard library modules could be used without any modification. See
@@ -225,7 +225,11 @@ TODO
           \item support for dynamically creating closures. See section \ref{closures-runtime-support};
         \end{itemize}
     \end{enumerate}
-  \item build script to automate the building of the compiler and runtime libraries (\lstinline!build_liballocs.sh!). See section \ref{build-process};
+  \item build script to automate the build process, which involves two steps:
+    \begin{enumerate}
+      \item invoking the Makefile of the OCaml compiler;
+      \item using the newly built compiler to build the OCaml standard library modules into C files;
+    \end{enumerate}
   \item test suite (\lstinline!tests/!) and test script (\lstinline!run_tests.sh!) which individually test features of my compiler, and are run before each commit. See section \ref{regression-testing};
   \item benchmark suite (\lstinline!bench/!) and benchmark scripts (\lstinline!benchmark.sh! and \lstinline!plot.r!) for performance evaluation. See section \ref{benchmarks}).
 \end{enumerate}
@@ -601,10 +605,7 @@ C_BinaryOp (C_Variable foo, "+",
 
   \item
     \lstinline!C.toplevel! represents a function or global variable declaration/definition at the toplevel.
-        TODO
 \end{itemize}
-
-Refer to (appendix -- section TODO) for the complete datatype definition.
 
 \section{Runtime value representation}\label{value-representation}
 
@@ -886,12 +887,8 @@ were an expression.
 
 By doing this, our example from above can be translated directly, simply by
 wrapping the \lstinline!C_If! statements up as an ``inline statement block'',
-which are a list of statements disguised as a single expression, where an
+which is a pseudo-expression representing a list of statements. The
 inline statement evaluates to the ``value'' of the last statement in the block.
-
-See section \ref{module-fixup} for more details.
-
-
 
 \section{\texttt{module Translate}: compilation from lambda IR to C AST}
 
@@ -939,13 +936,27 @@ of these instructions were divined through reverse engineering and code diving.
 ``Primitive'' operations in \lstinline!Lambda! are represented by
 \begin{lstlisting}
 Lprim (primitive, args)\end{lstlisting}
-where \lstinline!args! are a list of \lstinline!lambda! terms, and \lstinline!primitive! is a type of operation. Notable \lstinline!primitive!s include:
+where \lstinline!args! are a list of \lstinline!lambda! terms, and
+\lstinline!primitive! is a type of operation. Most primitive operations map
+fairly simply to C constructs. In total I handle 49 different primitives.
+Notable \lstinline!primitive!s include:
 \begin{enumerate}
-  \item \lstinline!Pmakeblock! performs an (untyped) allocation of a given size;
   \item unary and binary operations on integers and doubles;
   \item \lstinline!Praise! throws an exception;
-  \item \lstinline!Pstringlength! evaluates to the length of a C-style string. I translate this to a call to \lstinline!strlen!.
+  \item \lstinline!Pstringlength! evaluates to the length of a C-style string. I translate this to a call to \lstinline!strlen!;
+  \item \lstinline!Pmakeblock! performs an (untyped) allocation of a given size.
+
+    This is more complex than the others, as this primitive specifies
+    the values that the newly allocated memory is initialised to. Hence we need
+    to recursively translate these values, as well as wrapping up the
+    statements required for allocation and initialisation into a single
+    ``expression''.
+    
+    Things are made even more complex in the case that this
+    \lstinline!Pmakeblock! refers to a mutually recursive let-binding. We have
+    to split up the allocation and initialisation phases: see section \ref{mutually-recursive-values}.
 \end{enumerate}
+
 
 \subsubsection{Events}
 
@@ -968,11 +979,20 @@ information about the types of all variables defined in the entire module.
 
 \subsubsection{Inline function definitions (lambdas)}\label{c-inline-functions}
 
-\begin{lstlisting}
-let x = (fun x -> x + 1) 2
-\end{lstlisting}
 
-TODO
+OCaml allows one to define new functions anywhere, for example in the following example:
+\lml\begin{lstlisting}
+let x = (fun x -> x + 1) 41\end{lstlisting}\lnone{}
+However, C does not -- all
+functions must be defined at the toplevel. The way that we handle this is similar
+to how we expressionify statements: by introducing an ``inline function
+definition'' pseudo-expression. After fixup the function body will get pulled
+out to the toplevel, and the pseudo-expression replaced with the name of the
+newly created function.
+
+Note that this does not work if the function is not closed (depends on values
+from its environment). In this case we must create a closure at runtime instead, and
+this is the subject of section \ref{closures}.
 
 \section{\texttt{module Fixup}: translation from extended-C AST to valid C AST}\label{module-fixup}
 
@@ -1019,6 +1039,11 @@ for example when fixing the bodies of if, for and while loops. Also, care must
 be taken to preserve evaluation order -- statements must be consed onto the
 head of the accumulator in the order that they must be evaluated.
 
+Inline function definitions are easier to handle. All such functions are pulled
+out and placed at the top of the C file in the order they were encountered.
+Each ``inline function definition'' pseudo-expression is replaced with the
+identifier of the newly-created function.
+
 \section{\texttt{module Emitcode}: outputting C AST to a file}\label{emitcode}
 
 \lstinline!Emitcode! is responsible for stringifying the AST into valid C code,
@@ -1048,7 +1073,6 @@ to note:
 
 \section{Build process}\label{build-process}
 
-TODO
 
 Also see \ref{module-list}.
 
@@ -1186,8 +1210,6 @@ be made.
 I selectively implemented functions that were necessary for the subset of
 stdlib functionality that was required to run my tests and benchmarks.
 
-See appendix TODO for details.
-
 \subsection{Printing to \texttt{stdout} and \texttt{stderr}}\label{pervasives-printing}
 
 Two sets of C runtime functions had to be implemented in order to support
@@ -1289,7 +1311,7 @@ of these instructions were divined through reverse engineering and code diving.
 
 \subsection{Static exceptions}
 
-Static exceptions are confined to a lexically local scope -- i.e. the raise and
+Static exceptions are confined to local lexical scopes -- i.e. the raise and
 the corresponding try are in the same function. The lambda instructions for
 these are \lstinline!Lstaticraise! and \lstinline!Lstaticcatch!.
 
@@ -1297,17 +1319,18 @@ In this case, we can implement these using the C \lstinline!goto! feature,
 which allows control flow to jump non-linearly to another point in the same
 function.
 
-The structure gets compiled into the following construct:
+A static exception gets compiled into the following construct:
 
-\begin{lstlisting}
+\lc\begin{lstlisting}
 if (1) {
-    /* body */
-    // goto label_staticcatch_1;
+    // body, where raises get transformed into:
+    goto label_staticcatch_1;
+
 } else {
 label_staticcatch_1:;
-    /* handler */
+    // handler, only reachable by goto
 }
-\end{lstlisting}
+\end{lstlisting}\lnone{}
 
 \subsection{Non-static exceptions}
 
@@ -1323,25 +1346,18 @@ of the program, so that execution flow resumes as if the original
 \lstinline!setjmp! returned for a second time. \lstinline!setjmp! will return
 non-zero iff it is returning for the second time.
 
-I use this mechanism to support exception handling. TODO
+In my scheme, each exception handler calls \lstinline!setjmp!, and pushes its
+\lstinline!jmpbuf! onto the head of a global singly-linked list.
+When an exception is raised, \lstinline!longjmp! is used to
+``unwind'' to the last installed exception handler. The value of the exception
+that was raised is stored in another global variable, so that the
+exception handler can pattern match against it.
 
-\begin{lstlisting}
-  if (setjmp(jmp_buf) == 0) {
-    // first time
-    longjmp(jmp_buf);
-  } else {
-    // second time
-  }
-\end{lstlisting}
-
-\lstinline!setjmp! allows control flow to ``unwind'' to the last installed
-exception handler. The value of the exception currently being handled is stored
-in a global variable known to the compiler, so that exception handlers can
-pattern match against it. The exception handler is uninstalled (``popped'' off
-the stack of exception handlers) when:
+The exception handler is ``uninstalled'' (popped off the head of the
+singly-linked list of handlers) when:
 \begin{itemize}
   \item a try block finishes without raising; or
-  \item a handler starts executing. This prevents exceptions raised inside the
+  \item the handler starts executing. This prevents exceptions raised inside the
       handler from incorrectly being recursively handled by itself.
 \end{itemize}
 
@@ -1355,20 +1371,20 @@ can print the name of the exception before aborting.
 
 If an exception propagates all the way to the top without being handled
 successfully, the runtime needs to print an error message and abort the
-program. This is done by installing a root handler in \lstinline!main! before
+program. This is done by installing a catch-all handler in \lstinline!main! before
 calling into OCaml code.
 
-Assuming that the module being compiled is called \lstinline!Test!, the
+Assuming that the module being compiled is called \lstinline!Foo!, the
 following is the C \lstinline!main! function:
 
 \begin{lstlisting}
-void Test__init();
+void Foo__init();
 
 int main() {
     // set up root exception handler
     OCAML_LIBALLOCS_EXN_PUSH();
     if (0 == OCAML_LIBALLOCS_EXN_SETJMP()) {
-        Test__init();
+        Foo__init();
         return 0;
     } else { // catch
         OCAML_LIBALLOCS_EXN_POP();
@@ -1615,41 +1631,109 @@ values of each free variable into the environment at the time of closure
 creation.
 
 There is no explicit annotation in the OCaml lambda IR to indicate that a
-closure must be created -- the compiler has to perform free-variable analysis
-to determine this itself. We handle three separate scenarios where closures
-must be created:
+closure must be created -- we have to perform free-variable analysis
+to determine this. We handle three separate scenarios during translation where
+closures must be created:
 
 \begin{itemize}
     \item \textbf{Function let-binding with non-empty free variable set}:
-      \begin{lstlisting}
+      \lml\begin{lstlisting}
 let make_counter_v1 () =
   let ctr = ref 0 in
   let count () = ctr := !ctr + 1; !ctr in
-  count
-      \end{lstlisting}
+  count\end{lstlisting}\lnone{}
+      This case arises during translation of \lstinline!Llet! and \lstinline!Lletrec!.
+			Let-bound functions only need to be closures if their free variable set is
+      non-empty. Otherwise they do not depend on their environment and can simply
+      be represented as an ``inline function definition'' (section \ref{c-inline-functions}).
+
+      Otherwise, a new closure implementation function has to be created, and
+      a call to \lstinline!ocaml_liballocs_close! generated.
     \item \textbf{Anonymous lambda with non-empty free variable set}:
-      \begin{lstlisting}
+      \lml\begin{lstlisting}
 let make_counter_v2 () =
   let ctr = ref 0 in
-  fun () -> (ctr := !ctr + 1; !ctr)
-      \end{lstlisting}
+  fun () -> (ctr := !ctr + 1; !ctr)\end{lstlisting}\lnone{}
+			This case has to be handled when \lstinline!Lfunction! is being
+			translated. It is similar to the previous, except that the lambda has no name,
+			so we have to make one up.\footnote{Our naming scheme is \lstinline!__lambda_1234!.}
     \item \textbf{Partial application}:
-      \begin{lstlisting}
+      \lml\begin{lstlisting}
 let make_counter_v3 () =
   let count ctr () = ctr := !ctr + 1; !ctr in
-  count (ref 0)
-      \end{lstlisting}
+  count (ref 0)\end{lstlisting}\lnone{}
+			This case is triggered whenever \lstinline!Lapply! is encountered, and
+			the number of arguments given is less than the arity of the function
+			being called. This results in a closure, as an environment is
+			needed to store the partially applied arguments.
+
+      A new implementation function is created, and
+      \lstinline!ocaml_liballocs_close! is called at the point of partial
+      application, which takes an environment containing the partially applied
+      arguments. The implementation function has to extract the partially
+			applied arguments from its environment before calling the original
+			function with all the required arguments (\lstinline!count! in this case).
 \end{itemize}
 
-TODO: explain what we have to do with these
+\subsubsection{Recursive closures}
 
-\subsubsection{Recursive and mutually recursive closures}
+Consider a function \lstinline!f! referencing itself and \lstinline!foo!. An
+environment needs to be created:
+\begin{lstlisting}
+f_env = {f_closure, foo}\end{lstlisting}
+where \lstinline!f_closure! is the code stub pointer returned by \lstinline!ocaml_liballocs_close!.
 
-Mutually recursive closures share an environment. Hence calls between two
-mutually recursive closures must pass the same environment pointer to each
-invocation.
+However, this definition is mutually recursive:
+\lstinline!ocaml_liballocs_close! needs to know the address of
+\lstinline!f_env! in order to create the closure.
+We use the same technique as
+we introduced in section \ref{mutually-recursive-values} to define these values recursively in a three step process:
+\begin{enumerate}
+  \item First \lstinline!f_env! is allocated, but the contents are left uninitialised;
+  \item \lstinline!ocaml_liballocs_close! is called with the address of \lstinline!f_env!, returning the closure pointer;
+  \item The contents of \lstinline!f_env! are then initialised with this closure, along with \lstinline!foo!.
+\end{enumerate}
 
-Self-recursive closures are a special case of this.
+\subsubsection{Mutually recursive closures}
+
+Say that function \lstinline!f1! references \lstinline!f2! and
+\lstinline!foo!, and \lstinline!f2! references \lstinline!f1! and
+\lstinline!bar!. Currently, two separate environments are created:
+\begin{itemize}
+  \item \lstinline!f1_env = {f2_closure, foo}!
+  \item \lstinline!f2_env = {f1_closure, bar}!
+\end{itemize}
+Where \lstinline!f1_closure! and \lstinline!f2_closure! are the code stub pointers
+with \lstinline!f1_env! and \lstinline!f2_env! embedded in them, respectively.
+
+The implementation functions will call into the other function's code stub
+each time it recurses.
+
+\subsubsection{Possible optimisations}
+
+I had some ideas on improving the current implementation of recursive closures,
+but did not have time to implement these optimisations.
+
+\begin{enumerate}
+  \item An optimisation that could be made is to merge environments for recursive closures.
+    \begin{lstlisting}
+    f1_f2_env = {foo, bar}\end{lstlisting}
+    Notice that this allows us to elide the closures themselves from the environments.
+    This is because the implementation function \lstinline!f1_impl! no longer needs
+    the \lstinline!f2! closure code stub: it can just call
+    the other with the environment pointer it received itself:
+    instead of \lstinline!f2(...)! we make a call to \lstinline!f2_impl(..., env)!.
+
+    This would also allow recursive tail-calls of closures which take more
+    than 5 arguments to work as expected without overflowing the stack. The
+    fact that the closure doesn't
+    call back into its code stub means that no additional stack space needs
+    to be used.
+
+  \item Another possible optimisation is that if a closure only requires one
+    environment value, instead of allocating an environment object containing a
+    single reference, the value itself could be passed instead.
+\end{enumerate}
 
 
 
@@ -1734,11 +1818,6 @@ A selection of illustrative tests, and the C code produced, is given below.
         \lstinline!List! functions -- section \ref{module-list};
     \item \textbf{\texttt{stringswitch}}: tests pattern matching on strings --
         section \ref{stringswitch};
-
---
-
-    \item \textbf{\texttt{1}}: TODO
-    \item \textbf{\texttt{overapplication}}: TODO
 \end{enumerate}
 
 \section{Benchmarks}\label{benchmarks}
@@ -1764,6 +1843,8 @@ I repeated each run 50 times, generating over 40000 results. These are
 processed and graphed using R and ggplot2. I had to learn this language and
 library from scratch, but it turned out to be a powerful tool for processing
 the large amounts of CSV data my benchmarking script generates.
+
+The results are summarised in \ref{benchmark-table}.
 
 \begin{figure}[h]
   \centering
@@ -1840,7 +1921,7 @@ benchmark                     & mean  & sd    & mean  & sd    & mean  & sd    & 
 \hline
 \end{tabular}
 
-\caption{Summary table of results for all benchmarks. The mean and standard deviations of 50 repeat runs are shown. Performance is colour coded relative to the ``ocaml'' bytecode benchmark results -- green indicates a result that is faster than this baseline, and red slower.}
+\caption{Summary table of results for all benchmarks. The mean and standard deviations of 50 repeat runs are shown. Performance is colour coded relative to the ``ocaml'' bytecode benchmark results -- green indicates a result that is faster than this baseline, and red slower.}\label{benchmark-table}
 \end{figure}
 
 \begin{figure}
@@ -2033,6 +2114,31 @@ This makes heavy use of both integer and floating point arithmetic (\lstinline!l
 
 
 \subsection{Investigating performance discrepancies}
+
+\subsubsection{}
+
+  The \lstinline!list_sort! and \lstinline!p153! benchmarks fail with a
+  segmentation fault when compiled with \lstinline!clang -O0! or
+  \lstinline!gcc! at all optimisation levels. The cause of this is a stack
+  overflow from a lack of tail-call optimisation.
+
+  On further investigation, I found the root cause, illustrated by the following C function:
+\lc\begin{lstlisting}
+int f(int x) {
+  int ret;
+  if (g(x)) {
+    ret = f(x + 1);
+  } else {
+    ret = 42;
+  }
+  return ret;
+}\end{lstlisting}\lnone{}
+  With a small amount of optimisation, \lstinline!f(x + 1)! can be moved into
+  tail call position.  The C specification does not provide any guarantees
+  about tail-calls, however it is still somewhat surprising that GCC fails to recognise
+  this case.
+
+  \subsubsection{Instrumentation}
 
 In order to dig deeper into why certain benchmarks seem perform significantly
 worse than others, I decided to create a branch of my compiler with an
