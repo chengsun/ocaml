@@ -218,6 +218,11 @@ compiler. The compiler is itself written in OCaml, and is a large and complex
 code base developed over the course of over 20 years, consisting of 197k lines
 of OCaml and 42k lines of C.\footnote{As counted by the \lstinline!cloc! tool.}
 
+Unfortunately it turns out the codebase is very sparsely commented, with no
+documentation available as to its inner workings. I spent a significant amount of
+my preparation phase tracing through dumps of internal representations of
+example OCaml programs to gain understanding.
+
 The OCaml compiler processes OCaml code in several phases:
 
 \begin{center}
