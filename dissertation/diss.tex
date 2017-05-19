@@ -6,7 +6,7 @@
 \usepackage{verbatim}
 \usepackage{docmute}   % only needed to allow inclusion of proposal.tex
 \usepackage{amsmath}
-\usepackage{pdflscape}
+\usepackage{multirow}
 
 \usepackage[nottoc,notlot,notlof]{tocbibind} % get the bibliography to be listed in the ToC as an unnumbered sectional unit
 
@@ -501,7 +501,7 @@ The stages of my C compiler backend are as follows:
   \includegraphics[width=16cm]{compiler_structure}
 \end{center}
 
-\subsection{\texttt{module C}: the extended C abstract syntax tree datatype}\label{module-c}
+\section{\texttt{module C}: the extended C abstract syntax tree datatype}\label{module-c}
 
 I have defined a datatype representing a C-like syntax tree. Not all C features
 are modelled -- only the constructs that my compiler needs to produce.
@@ -653,42 +653,74 @@ compilers and interpreters:
 
 \subsection{NaN boxing}\label{nan-boxing}
 
-NaN boxing is a very surprising technique which can be used to achieve several things that we want:
+NaN boxing is a surprising technique which, in contrast to the other
+techniques described previously, has the following desirable properties:
 \begin{enumerate}
-    \item TODO
+    \item has the ability to store IEEE 754 floating point numbers (\lstinline!double!s) unboxed;
+    \item provides additional space to store user-space pointers\footnote{On 64-bit
+      Linux, user-space pointers are only 48-bits long. The top bits are always
+      zero, to distinguish them from kernel pointers, which have top bits set to
+      one.};
+    \item provides even more additional space (which we use to store 50-bit integers);
+    \item none of these three ranges overlap: a simple comparison test can be
+      used to distinguish which of the three types a given NaN boxed value is.
 \end{enumerate}
 
 NaN boxing allows us to represent doubles unboxed. Our implementation of NaN
 boxing was inspired by JavaScriptCore's \cite{jscore}, however the exact choice
 of encoding and implementation details are original.
 
-The key idea is that Not-a-Number (NaN) values in IEEE 754 double-precision
-floating point values take up a needlessly large range of the 64-bit space. In
+The representation of IEEE 754 double-precision floats is shown in figure \ref{fig-ieee754}.
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=14cm]{ieee754}
+  \caption{The memory format of an IEEE 754 double floating point value.}
+  \label{fig-ieee754}
+\end{figure}
+
+Not-a-Number (NaN) values in IEEE 754 double values take
+up a needlessly large range of the 64-bit space. In
 particular, any of the $2^{53}-1$ numbers with an exponent of \texttt{0x7FF} and
-non-zero mantissa is a NaN value. There are only four different NaNs: plus or
-minus quiet ($\pm$qNaN) and signalling ($\pm$sNaN). Modern CPUs only ever use
-one specific (canonical) bit representation for each type of NaN, which leaves
-the rest of the range to embed other types of values into.
+non-zero mantissa is a NaN value. However, there are actually only four
+different NaNs: plus or minus quiet ($\pm$qNaN) and signalling ($\pm$sNaN).
+Modern CPUs only ever use one specific (canonical) bit representation for each
+type of NaN, which leaves the rest of the range to embed other types of values
+into (see the first two columns of table \ref{table-nan-range}).
 
-TODO: fix this table!
+Before we store the embedded value into the \lstinline!ocaml_value_t!, we perform
+one final adjustment: add $2^{48}$ to the integer representation of the double. This
+gives us the ``in-memory representation'' shown in the third column of table
+\ref{table-nan-range}. The purpose of this is so that the final representation
+of pointers is exactly the same as their raw representation (with top 16 bits clear).
+This means the common operation of dereferencing a pointer \lstinline!ocaml_value_t!
+requires no additional overhead.
 
-\begin{tabular}{c c | c c | c}
-    63..52 & 51..0 & 63..52 & 51..0 & purpose \\
-    \lstinline!fff! & \lstinline!0000000000000! & \lstinline!fff! & \lstinline!1000000000000! & Negative infinity \\
-    \lstinline!fff! & \lstinline!4000000000000! & \lstinline!fff! & \lstinline!5000000000000! & Negative signalling NaN (canonical) \\
-    \lstinline!fff! & \lstinline!8000000000000! & \lstinline!fff! & \lstinline!9000000000000! & Negative quiet NaN (canonical) \\
-    \lstinline!fff! & \lstinline!b000000000000! & \lstinline!fff! & \lstinline!c000000000000! & Integers (50-bit space) \\
-    \lstinline!fff! & \lstinline!effffffffffff! & \lstinline!fff! & \lstinline!fffffffffffff! & Integers (50-bit space) \\
-    \lstinline!fff! & \lstinline!f000000000000! & \lstinline!000! & \lstinline!0000000000000! & Pointers (48-bit space) \\
-    \lstinline!fff! & \lstinline!fffffffffffff! & \lstinline!000! & \lstinline!0ffffffffffff! & Pointers (48-bit space)
+\begin{table}
+  \centering
+\begin{tabular}{c | c | c}
+  \textbf{purpose} & \textbf{double space representation} & \textbf{in-memory representation} \\ \hline\hline
+    \rowcolor[rgb]{0.7,0.7,0.7}$-{}$infinity & \lstinline!fff0! \lstinline!000000000000! & \lstinline!fff1! \lstinline!000000000000! \\ \hline
+    unused  & \vdots & \vdots \\
+    \rowcolor[rgb]{0.7,0.7,0.7}$-{}$sNaN (canonical)  & \lstinline!fff4! \lstinline!000000000000! & \lstinline!fff5! \lstinline!000000000000! \\
+    unused  & \vdots & \vdots \\ \hline
+    \rowcolor[rgb]{0.7,0.7,0.7}$-{}$qNaN (canonical)  & \lstinline!fff8! \lstinline!000000000000! & \lstinline!fff9! \lstinline!000000000000! \\
+    unused  & \vdots & \vdots \\ \hline
+    \rowcolor[rgb]{0.7,1.0,0.7} & \lstinline!fffb! \lstinline!000000000000! & \lstinline!fffc! \lstinline!000000000000! \\
+    \rowcolor[rgb]{0.7,1.0,0.7} & \vdots & \vdots \\
+    \rowcolor[rgb]{0.7,1.0,0.7}\multirow{-3}{*}{Integers (50-bit space)} & \lstinline!fffe! \lstinline!ffffffffffff! & \lstinline!ffff! \lstinline!ffffffffffff! \\ \hline
+    \rowcolor[rgb]{0.7,1.0,0.7} & \lstinline!ffff! \lstinline!000000000000! & \lstinline!0000! \lstinline!000000000000! \\
+    \rowcolor[rgb]{0.7,1.0,0.7} & \vdots & \vdots \\
+    \rowcolor[rgb]{0.7,1.0,0.7}\multirow{-3}{*}{Pointers (48-bit space)} & \lstinline!ffff! \lstinline!ffffffffffff! & \lstinline!0000! \lstinline!ffffffffffff! \\
 \end{tabular}
+\caption{Table showing negative NaN space. There is a similar unused space
+inside the positive NaN region, but we don't use that. Values which we cannot
+reuse are coloured grey, and ranges which we've reserved for ourselves are
+coloured green.}\label{table-nan-range}
+\end{table}
 
-Using this representation \lstinline!ocaml_value_t! can be used to wrap one of the following three types in such a way that the original type of the value can be discriminated (i.e. the ranges do not overlap):
-\begin{enumerate}
-  \item an unboxed (or \textit{immediate}) 50-bit integer;
-  \item an unboxed (or \textit{immediate}) double-precision floating point value (\lstinline!double! in C);
-  \item a boxed value -- a pointer to a heap-allocated value (\lstinline!ocaml_value_t*! in C).
-\end{enumerate}
+Notice that for efficiency, the ``in-memory representation'' of integers was
+chosen such that the original integer can be recovered exactly using a single
+bit-mask operation.
 
 The actual C type definition of \lstinline!ocaml_value_t! is the following union:
 \lc\begin{lstlisting}
@@ -812,74 +844,6 @@ into type ``target'' is defined as below:
   \item Otherwise use a C cast to the target type.
 \end{enumerate}
 
-TODO: mention why we need this operation\dots
-
-\section{\texttt{module Translate}: compilation from lambda IR to C AST}
-
-The implementation of \lstinline!Translate! is done via a recursive tree-walk
-over the \lstinline!Lambda! tree. Three mutually recursive functions each
-target different types of C program fragment:
-
-TODO
-
-Note that each translation function also returns the C return type
-(\lstinline!C.ctype!) of the expression or statement. This is for the purposes of ``casting'', as defined earlier.
-
-Unfortunately the lambda IR is not documented anywhere, so the semantics
-of these instructions were divined through reverse engineering and code diving.
-OCaml's expressive type system often hinted at the semantics of various
-parts of the code.
-
-\subsubsection{Primitive operations}
-
-``Primitive'' operations in \lstinline!Lambda! are represented by
-\begin{lstlisting}
-Lprim (primitive, args)\end{lstlisting}
-where \lstinline!args! are a list of \lstinline!lambda! terms, and \lstinline!primitive! is one of:
-\begin{enumerate}
-  \item \lstinline!Pidentity! which returns its sole argument verbatim;
-  \item \lstinline!Pignore! which evaluates and ignores the result of its sole argument;
-  \item \lstinline!Popaque! which for our purposes can be treated the same as
-    \lstinline!Pidentity!. However, this seems to have a special meaning inside
-    the module. Any external modules that the current compilation unit
-    depends on are listed as a sequence of
-    \lstinline!Lprim (Popaque, [external_module])!;
-  \item \lstinline!Pdirapply! and \lstinline!Prevapply! 
-  \item \lstinline!Pgetglobal! TODO
-  \item \lstinline!Pfield! and \lstinline!Pfloatfield! TODO
-  \item \lstinline!Psetfield! TODO
-  \item \lstinline!Pmakeblock! TODO
-  \item various unary and binary operations TODO
-  \item \lstinline!Pccall! TODO
-  \item \lstinline!Praise! TODO
-  \item \lstinline!Pstringlength! TODO
-  \item \lstinline!Pstringrefs! TODO
-\end{enumerate}
-
-\subsubsection{Structured constants}
-
-TODO
-
-\subsubsection{Events}
-
-\subsubsection{Other \texttt{Lambda} operations}
-
-\begin{enumerate}
-  \item \lstinline!Lvar! TODO
-  \item \lstinline!Lfunction! TODO
-  \item \lstinline!Lapply! TODO
-
-    ---
-
-  \item \lstinline!Llet!, \lstinline!Lletrec! TODO
-  \item \lstinline!Lsequence! TODO
-  \item \lstinline!Lifthenelse! TODO
-  \item \lstinline!Lwhile! -- see section \ref{while-loops}
-  \item \lstinline!Lfor! -- see section \ref{for-loops}
-  \item \lstinline!Lstringswitch! -- see section \ref{stringswitch}
-  \item \lstinline!Ltrywith!, \lstinline!Lstaticcatch!, \lstinline!Lstaticraise! -- see section \ref{exceptions}
-\end{enumerate}
-
 \subsubsection{Inline statements}\label{c-inline-statements}
 
 The fact that C language makes a distinction between ``statements'' and
@@ -918,6 +882,76 @@ inline statement evaluates to the ``value'' of the last statement in the block.
 
 See section \ref{module-fixup} for more details.
 
+
+
+\section{\texttt{module Translate}: compilation from lambda IR to C AST}
+
+The implementation of \lstinline!Translate! is done via a recursive tree-walk
+over the \lstinline!Lambda! tree. Three mutually recursive functions each
+target different types of C program fragment:
+
+\lml\begin{lstlisting}
+val lambda_to_texpression :
+  Lambda.lambda -> C.ctype * C.expression
+val lambda_to_trev_statements :
+  Lambda.lambda -> C.ctype * C.statement list\end{lstlisting}\lnone{}
+
+Note that each translation function also returns the \lstinline!C.ctype! of the expression or statement. This is for the purposes
+of casting, as defined earlier. For instance, if an OCaml expression
+evaluates to an \lstinline!ocaml_value_t!, and is subsequently used in an if
+condition, the value must first be unwrapped into a boolean. The
+\lstinline!C.cast! function handles all kinds of valid casts for me.
+
+Because of the \lstinline!cast! mechanism, and the fact I can embed statements
+within expressions using \lstinline!C_InlineRevStatements!, the actual translation
+from \lstinline!Lambda! is actually fairly straight-forward.
+
+To illustrate, the following is the implementation of
+\lstinline!lambda_to_trev_statements! for OCaml if statements:
+\begin{lstlisting}
+...
+| Lifthenelse (l,lt,lf) ->
+  let cexpr_cond = cast C_Bool (lambda_to_texpression l) in
+  let trev_t = lambda_to_trev_statements lt in
+  let trev_f = lambda_to_trev_statements lf in
+  let (ctype, sl_t, sl_f) = unify_revsts ~hint:"ifthenelse" trev_t trev_f in
+  ctype, [C_If (cexpr_cond, sl_t, sl_f)]
+...\end{lstlisting}
+
+Unfortunately the lambda IR is not documented anywhere, so the semantics
+of these instructions were divined through reverse engineering and code diving.
+
+\subsubsection{Primitive operations}
+
+``Primitive'' operations in \lstinline!Lambda! are represented by
+\begin{lstlisting}
+Lprim (primitive, args)\end{lstlisting}
+where \lstinline!args! are a list of \lstinline!lambda! terms, and \lstinline!primitive! is a type of operation. Notable \lstinline!primitive!s include:
+\begin{enumerate}
+  \item \lstinline!Pmakeblock! performs an (untyped) allocation of a given size;
+  \item unary and binary operations on integers and doubles;
+  \item \lstinline!Praise! throws an exception;
+  \item \lstinline!Pstringlength! evaluates to the length of a C-style string. I translate this to a call to \lstinline!strlen!.
+\end{enumerate}
+
+\subsubsection{Events}
+
+Events are a special \lstinline!Lambda! constructor which contains static
+information on a particular scope, used by the OCaml debugger. Notably for us
+this contains the \lstinline!type_expr!s of variable bindings inside the scope.
+
+It's not possible to make use of events during the translation step itself,
+as an event describing a particular binding can be encountered too late during
+the recursive traversal. For instance the event describing the types of arguments
+to a function can be buried inside the body of the function, whereas
+translation needs to know the type at the point the arguments are first encountered.
+
+We perform a step before compilation proper, which I called ``event scraping''.
+This is a complete traversal of the \lstinline!Lambda! tree, where all non-event
+nodes are ignored. Type expressions in all events encountered are cached in a
+``variable library,'' a hash table mapping variable identifiers
+(\lstinline!Ident.t!) to their types. Once event scraping is complete, we have
+information about the types of all variables defined in the entire module.
 
 \subsubsection{Inline function definitions (lambdas)}\label{c-inline-functions}
 
