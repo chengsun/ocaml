@@ -184,7 +184,7 @@ void ocaml_liballocs_recursive_show(ocaml_value_t v) {
         int n = type->pos_maxoff / 8;
 
         fprintf(stderr, "[ ");
-        for (int i = 0; i < n; i += 8) {
+        for (int i = 0; i < n; ++i) {
             ocaml_liballocs_recursive_show(GET_P(v)[i]);
             if (i > 0 && i < n-1) {
                 fprintf(stderr, ", ");
