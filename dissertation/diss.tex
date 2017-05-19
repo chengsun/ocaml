@@ -11,6 +11,7 @@
 \usepackage[nottoc,notlot,notlof]{tocbibind} % get the bibliography to be listed in the ToC as an unnumbered sectional unit
 
 \usepackage[usenames,dvipsnames,svgnames,table]{xcolor}         % X11 colour names
+\usepackage{pdfpages}
 \usepackage{listings}       % Source code listings
 \usepackage{courier}        % courier font
 \usepackage{textcomp}       % straight quotes
@@ -2333,6 +2334,6 @@ let overapplied = f 10 20\end{lstlisting}\lnone{}
 %
 \chapter{Project Proposal}
 
-%\input{proposal}
+\includepdf[pages=-]{proposal.pdf}
 
 \end{document}
