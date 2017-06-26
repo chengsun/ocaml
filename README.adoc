@@ -1,3 +1,30 @@
+= OCaml compiler with experimental C backend =
+
+This is an experimental fork of OCaml 4.03 augmented with a new experimental C backend. The project was carried out to fulfill the requirements of the Part II Computer Science Tripos at the University of Cambridge.
+
+*This code is not ready for general use!* No support is provided -- the source code has been released for documentation purposes only.
+
+== What's inside?
+
+bytecomp/liballocs.ml:: the backend code
+stdlib_liballocs/:: the OCaml standard library. These files are copied verbatim from 'stdlib/'
+liballocs_runtime.{c,h}:: runtime support library
+bench/:: benchmarks
+tests/:: regression tests
+dissertation/:: project documents (proposal, presentations and dissertation)
+
+
+Some scripts are provided. The first two should work fine, and serve as an example of how to invoke the compiler and use its output.
+
+* `build_liballocs.sh` builds the compiler with C backend support, and compiles ML files in the `stdlib_liballocs/` directory into C;
+* `run_tests.sh` runs all enabled regression tests;
+* `benchmark.sh fibonacci` runs benchmark 'fibonacci', and saves the results to a log. *This script has hard coded paths and won't work without modification*;
+* `plot.r` plots the logged benchmark results. *Don't expect this to do what you think it does*.
+
+
+
+The original README follows.
+
 = README =
 
 == OVERVIEW
